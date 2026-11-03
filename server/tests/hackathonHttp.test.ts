@@ -311,4 +311,28 @@ describe("Upside-Down 2.0: Full HTTP API Endpoints Test", () => {
     } finally { abort.abort(); await reader.cancel().catch(() => {}); }
   });
 
+  it("task regeneration preserves ownership and new projects cannot overwrite prior tasks", async () => {
+    const get = async (route: string) => (await fetch(baseUrl + route)).json() as Promise<any>;
+    const post = async (route: string, body?: unknown) => {
+      const response = await fetch(baseUrl + route, {method: "POST", headers: {"Content-Type":"application/json"}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
+      assert.ok(response.ok, await response.clone().text()); return response.json() as Promise<any>;
+    };
+    const before = (await get(`/hackathon/projects/${projectId}/tasks`)).tasks;
+    const repeated = await post(`/hackathon/projects/${projectId}/tasks/generate`);
+    assert.equal(repeated.preserved, true);
+    assert.deepEqual(repeated.tasks, before);
+    const created = await post('/hackathon/projects', {name: 'Isolation fixture',problemStatement:'Preserve prior project task ownership',developerCount:2});
+    const id = created.project.id;
+    const ideas = await post(`/hackathon/projects/${id}/ideas/generate`);
+    await post(`/hackathon/projects/${id}/ideas/${ideas.ideas[0].id}/select`);
+    const arch = await post(`/hackathon/projects/${id}/architecture/generate`);
+    await post(`/hackathon/projects/${id}/architecture/approve`, {version:arch.architecture.version});
+    const generated = await post(`/hackathon/projects/${id}/tasks/generate`);
+    assert.ok(generated.tasks.every((task: any) => task.taskId.startsWith(id + ':')));
+    assert.deepEqual((await get(`/hackathon/projects/${projectId}/tasks`)).tasks, before);
+    const next = await post(`/hackathon/projects/${id}/architecture/generate`);
+    assert.equal(next.architecture.version, arch.architecture.version + 1);
+    assert.equal(next.architecture.isApproved, false);
+  });
+
 });

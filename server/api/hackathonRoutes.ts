@@ -252,6 +252,7 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
       }
 
       const blueprint = await ai.generateArchitecture(project, selectedIdea);
+      blueprint.version = (repo.getArchitecture(project.id)?.version ?? 0) + 1;
       repo.saveArchitecture(blueprint);
 
       broadcastProjectEvent(project.id, "ARCHITECTURE_GENERATED", { version: blueprint.version });
@@ -297,7 +298,13 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
         return;
       }
 
-      const tasks = await ai.decomposeTasks(project, arch, project.developerCount);
+      const existingTasks = repo.listTasks(project.id);
+      if (existingTasks.length) { res.json({ success: true, tasks: existingTasks, preserved: true }); return; }
+      if (!arch.isApproved) { res.status(409).json({error: "Approve architecture before assigning work"}); return; }
+      const tasks = (await ai.decomposeTasks(project, arch, project.developerCount)).map(task => ({
+        ...task, taskId: `${project.id}:${task.taskId}`,
+        dependencies: task.dependencies.map(id => `${project.id}:${id}`),
+      }));
       repo.saveTasks(tasks);
       repo.updateProjectStatus(project.id, "development");
 
