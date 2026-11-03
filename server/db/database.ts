@@ -11,6 +11,8 @@ import type { Task, TaskStatus } from "../../contracts/task.ts";
 import type { ActivityEvent } from "../../contracts/events.ts";
 import type { AgentInfo } from "../../contracts/agent.ts";
 import type { SyncEvent, ConflictRecord } from "../../contracts/sync.ts";
+import type { Project } from "../../contracts/project.ts";
+import type { StructuredHandoff } from "../../contracts/handoff.ts";
 
 export interface OutboxItem {
   id: string;
@@ -147,6 +149,30 @@ export class CoordinatorDatabase {
       );
 
       CREATE INDEX IF NOT EXISTS idx_conflicts_task ON conflicts(task_id);
+
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS handoffs (
+        id TEXT PRIMARY KEY,
+        from_agent TEXT NOT NULL,
+        to_agent TEXT NOT NULL,
+        task_id TEXT,
+        dependent_task_id TEXT,
+        handoff_type TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        contract_version TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_handoffs_to ON handoffs(to_agent);
+      CREATE INDEX IF NOT EXISTS idx_handoffs_task ON handoffs(task_id);
     `);
   }
 
@@ -626,4 +652,114 @@ export class CoordinatorDatabase {
       rejectionReason: row.rejectionReason ? String(row.rejectionReason) : undefined,
     };
   }
+
+  public saveProject(project: Project): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO projects (id, name, description, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        description = excluded.description,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(
+      project.id,
+      project.name,
+      project.description || null,
+      project.createdAt,
+      project.updatedAt
+    );
+  }
+
+  public getProject(id: string): Project | null {
+    const stmt = this.db.prepare(`
+      SELECT id, name, description, created_at as createdAt, updated_at as updatedAt
+      FROM projects WHERE id = ?
+    `);
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      id: String(row.id),
+      name: String(row.name),
+      description: row.description ? String(row.description) : undefined,
+      createdAt: String(row.createdAt),
+      updatedAt: String(row.updatedAt),
+    };
+  }
+
+  public listProjects(): Project[] {
+    const stmt = this.db.prepare(`
+      SELECT id, name, description, created_at as createdAt, updated_at as updatedAt
+      FROM projects ORDER BY created_at ASC
+    `);
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: String(row.id),
+      name: String(row.name),
+      description: row.description ? String(row.description) : undefined,
+      createdAt: String(row.createdAt),
+      updatedAt: String(row.updatedAt),
+    }));
+  }
+
+  public saveHandoff(handoff: StructuredHandoff): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO handoffs (id, from_agent, to_agent, task_id, dependent_task_id, handoff_type, summary, contract_version, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      handoff.id,
+      handoff.fromAgent,
+      handoff.toAgent,
+      handoff.taskId || null,
+      handoff.dependentTaskId || null,
+      handoff.handoffType,
+      handoff.summary,
+      handoff.contractVersion,
+      JSON.stringify(handoff.payload || {}),
+      handoff.createdAt
+    );
+  }
+
+  public listHandoffs(toAgent?: string, taskId?: string): StructuredHandoff[] {
+    let sql = `
+      SELECT id, from_agent as fromAgent, to_agent as toAgent, task_id as taskId,
+             dependent_task_id as dependentTaskId, handoff_type as handoffType,
+             summary, contract_version as contractVersion, payload, created_at as createdAt
+      FROM handoffs WHERE 1=1
+    `;
+    const params: (string | number | bigint | null)[] = [];
+    if (toAgent) {
+      sql += ` AND to_agent = ?`;
+      params.push(toAgent);
+    }
+    if (taskId) {
+      sql += ` AND (task_id = ? OR dependent_task_id = ?)`;
+      params.push(taskId, taskId);
+    }
+    sql += ` ORDER BY created_at DESC`;
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params) as Record<string, unknown>[];
+    return rows.map((row) => {
+      let payload = {};
+      try {
+        payload = JSON.parse(String(row.payload || "{}"));
+      } catch {
+        payload = {};
+      }
+      return {
+        id: String(row.id),
+        fromAgent: String(row.fromAgent),
+        toAgent: String(row.toAgent),
+        taskId: row.taskId ? String(row.taskId) : undefined,
+        dependentTaskId: row.dependentTaskId ? String(row.dependentTaskId) : undefined,
+        handoffType: row.handoffType as StructuredHandoff["handoffType"],
+        summary: String(row.summary),
+        contractVersion: String(row.contractVersion),
+        payload: payload as Record<string, unknown>,
+        createdAt: String(row.createdAt),
+      };
+    });
+  }
 }
+

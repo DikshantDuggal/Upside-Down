@@ -41,6 +41,15 @@ export function createServer(dbPath?: string): ServerInstance {
     }
   }
 
+  // Register default project if none exists
+  if (coordinator.listProjects().length === 0) {
+    coordinator.createProject({
+      id: "proj-upside-down",
+      name: "Upside-Down Collaboration Platform",
+      description: "Offline-First Multi-Agent Coding Collaboration Platform (PS-03)",
+    }, "system_init");
+  }
+
   const app: Express = express();
   app.use(cors());
   app.use(express.json());

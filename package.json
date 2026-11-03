@@ -10,12 +10,14 @@
     "build:frontend": "esbuild frontend/src/index.tsx --bundle --outfile=public/app.js --minify",
     "build": "npm run build:frontend && tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types server/tests/environment.test.ts && node --experimental-strip-types server/tests/coordinator.test.ts && node --experimental-strip-types server/tests/agentEngine.test.ts && node --experimental-strip-types server/tests/syncOffline.test.ts && node --experimental-strip-types server/tests/dashboardE2E.test.ts",
+    "test": "node --experimental-strip-types server/tests/environment.test.ts && node --experimental-strip-types server/tests/coordinator.test.ts && node --experimental-strip-types server/tests/agentEngine.test.ts && node --experimental-strip-types server/tests/syncOffline.test.ts && node --experimental-strip-types server/tests/dashboardE2E.test.ts && node --experimental-strip-types server/tests/multiAgentDemo.test.ts",
     "test:env": "node --experimental-strip-types server/tests/environment.test.ts",
     "test:backend": "node --experimental-strip-types server/tests/coordinator.test.ts",
     "test:agent": "node --experimental-strip-types server/tests/agentEngine.test.ts",
     "test:sync": "node --experimental-strip-types server/tests/syncOffline.test.ts",
-    "test:e2e": "node --experimental-strip-types server/tests/dashboardE2E.test.ts"
+    "test:e2e": "node --experimental-strip-types server/tests/dashboardE2E.test.ts",
+    "test:demo": "node --experimental-strip-types server/tests/multiAgentDemo.test.ts",
+    "demo": "node --experimental-strip-types server/tests/multiAgentDemo.test.ts"
   },
   "keywords": [
     "offline-first",

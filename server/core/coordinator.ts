@@ -13,6 +13,8 @@ import type {
 } from "../../contracts/task.ts";
 import type { ActivityEvent, EventCallback } from "../../contracts/events.ts";
 import type { AgentInfo } from "../../contracts/agent.ts";
+import type { Project, ProjectCreateRequest } from "../../contracts/project.ts";
+import type { StructuredHandoff, HandoffCreateRequest } from "../../contracts/handoff.ts";
 
 export class ConflictError extends Error {
   public currentRevision: number;
@@ -366,4 +368,103 @@ export class CoordinatorService {
 
     return updated;
   }
+
+  // --- Project Management ---
+
+  public createProject(req: ProjectCreateRequest, source: string = "api"): Project {
+    if (!req.name || req.name.trim().length === 0) {
+      throw new ValidationError("Project name is required");
+    }
+
+    const now = new Date().toISOString();
+    const project: Project = {
+      id: req.id ? req.id.trim() : randomUUID(),
+      name: req.name.trim(),
+      description: req.description?.trim(),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.db.saveProject(project);
+
+    this.publishEvent({
+      id: randomUUID(),
+      source,
+      type: "project_created",
+      timestamp: now,
+      payload: {
+        projectId: project.id,
+        name: project.name,
+      },
+    });
+
+    return project;
+  }
+
+  public getProject(id: string): Project {
+    const project = this.db.getProject(id);
+    if (!project) {
+      throw new NotFoundError(`Project not found: ${id}`);
+    }
+    return project;
+  }
+
+  public listProjects(): Project[] {
+    return this.db.listProjects();
+  }
+
+  // --- Structured Handoffs ---
+
+  public recordHandoff(req: HandoffCreateRequest, source?: string): StructuredHandoff {
+    if (!req.fromAgent || req.fromAgent.trim().length === 0) {
+      throw new ValidationError("fromAgent is required for handoff");
+    }
+    if (!req.toAgent || req.toAgent.trim().length === 0) {
+      throw new ValidationError("toAgent is required for handoff");
+    }
+    if (!req.summary || req.summary.trim().length === 0) {
+      throw new ValidationError("summary is required for handoff");
+    }
+
+    const now = new Date().toISOString();
+    const handoff: StructuredHandoff = {
+      id: randomUUID(),
+      fromAgent: req.fromAgent.trim(),
+      toAgent: req.toAgent.trim(),
+      taskId: req.taskId?.trim(),
+      dependentTaskId: req.dependentTaskId?.trim(),
+      handoffType: req.handoffType || "task_completed",
+      summary: req.summary.trim(),
+      contractVersion: "1.0.0",
+      payload: req.payload || {},
+      createdAt: now,
+    };
+
+    this.db.saveHandoff(handoff);
+
+    this.publishEvent({
+      id: randomUUID(),
+      taskId: handoff.taskId,
+      source: source || handoff.fromAgent,
+      type: "agent_handoff",
+      timestamp: now,
+      payload: {
+        handoffId: handoff.id,
+        fromAgent: handoff.fromAgent,
+        toAgent: handoff.toAgent,
+        taskId: handoff.taskId,
+        dependentTaskId: handoff.dependentTaskId,
+        handoffType: handoff.handoffType,
+        summary: handoff.summary,
+        details: handoff.payload,
+      },
+    });
+
+    return handoff;
+  }
+
+  public listHandoffs(toAgent?: string, taskId?: string): StructuredHandoff[] {
+    return this.db.listHandoffs(toAgent, taskId);
+  }
 }
+

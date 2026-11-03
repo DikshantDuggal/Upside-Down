@@ -1,3 +1,5 @@
+import type { ActivityEvent } from "../../contracts/events.ts";
+import { randomUUID } from "node:crypto";
 /**
  * REST API Routes & SSE Stream
  * Role 1 — Core Backend & Coordinator
@@ -26,6 +28,36 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
       protocolVersion: "1.0",
       activeSubscribers: coordinator.getSubscriberCount(),
     });
+  });
+
+
+  // --- Project Endpoints ---
+
+  router.get("/projects", (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const projects = coordinator.listProjects();
+      res.json(projects);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/projects", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const project = coordinator.createProject(req.body, "api");
+      res.status(201).json(project);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get("/projects/:id", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const project = coordinator.getProject(String(req.params.id));
+      res.json(project);
+    } catch (err) {
+      next(err);
+    }
   });
 
   // --- Task Endpoints ---
@@ -135,6 +167,50 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
       const events = coordinator.listEvents(taskId, since, limit);
       res.json(events);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+
+  router.post("/events", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { taskId, source, type, payload } = req.body;
+      if (!source || !type) {
+        throw new ValidationError("source and type are required");
+      }
+      const event: ActivityEvent = {
+        id: randomUUID(),
+        taskId,
+        source,
+        type,
+        timestamp: new Date().toISOString(),
+        payload: payload || {},
+      };
+      coordinator.recordExternalEvent(event);
+      res.status(201).json(event);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // --- Structured Handoffs ---
+
+  router.get("/handoffs", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const toAgent = req.query.toAgent as string | undefined;
+      const taskId = req.query.taskId as string | undefined;
+      const handoffs = coordinator.listHandoffs(toAgent, taskId);
+      res.json(handoffs);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/handoffs", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const handoff = coordinator.recordHandoff(req.body, req.body.fromAgent || "agent");
+      res.status(201).json(handoff);
     } catch (err) {
       next(err);
     }

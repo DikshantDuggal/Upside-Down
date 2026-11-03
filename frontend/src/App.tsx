@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from "react";
 
+interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+}
+
 interface Task {
   id: string;
   title: string;
@@ -66,10 +73,23 @@ interface ConflictRecord {
   resolution?: string;
 }
 
+interface Handoff {
+  id: string;
+  fromAgent: string;
+  toAgent: string;
+  taskId?: string;
+  dependentTaskId?: string;
+  handoffType: string;
+  summary: string;
+  contractVersion: string;
+  createdAt: string;
+}
+
 export function App() {
+  const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [patches, setPatches] = useState<Patch[]>([]);
+  const [handoffs, setHandoffs] = useState<Handoff[]>([]);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
@@ -80,13 +100,15 @@ export function App() {
   // Initial Data Fetch
   const refreshData = async () => {
     try {
-      const [tasksRes, agentsRes, eventsRes, syncRes, outboxRes, conflictsRes] = await Promise.all([
+      const [tasksRes, agentsRes, eventsRes, syncRes, outboxRes, conflictsRes, projectsRes, handoffsRes] = await Promise.all([
         fetch("/api/tasks").then((r) => r.json()),
         fetch("/api/agents").then((r) => r.json()),
         fetch("/api/events?limit=25").then((r) => r.json()),
         fetch("/api/sync/status").then((r) => r.json()),
         fetch("/api/sync/outbox").then((r) => r.json()),
         fetch("/api/sync/conflicts?resolved=false").then((r) => r.json()),
+        fetch("/api/projects").then((r) => r.ok ? r.json() : []).catch(() => []),
+        fetch("/api/handoffs").then((r) => r.ok ? r.json() : []).catch(() => []),
       ]);
 
       if (Array.isArray(tasksRes)) setTasks(tasksRes);
@@ -95,6 +117,8 @@ export function App() {
       if (syncRes && syncRes.enabled) setSyncStatus(syncRes);
       if (Array.isArray(outboxRes)) setOutbox(outboxRes);
       if (Array.isArray(conflictsRes)) setConflicts(conflictsRes);
+      if (Array.isArray(projectsRes)) setProjects(projectsRes);
+      if (Array.isArray(handoffsRes)) setHandoffs(handoffsRes);
 
       // Check for review patches
       const reviewTasks = (tasksRes as Task[]).filter((t) => t.status === "review");
@@ -210,12 +234,98 @@ export function App() {
         body: JSON.stringify({
           title: `Fix math utility regression #${Date.now().toString().slice(-4)}`,
           description: "Detected assertion error in calculateTotal: expected 15, got NaN. Automatic repair requested.",
-          ownerId: "agent-engine-01",
+          ownerId: "agent-runner",
         }),
       });
       refreshData();
     } catch (err) {
       console.error("Create task failed:", err);
+    }
+  };
+
+  const runMultiAgentDemo = async () => {
+    try {
+      await fetch("/api/agents/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "agent-backend-codex", name: "Backend Agent (Codex)", status: "running" }),
+      });
+      await fetch("/api/agents/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "agent-frontend-claude", name: "Frontend Agent (Claude)", status: "running" }),
+      });
+
+      const taskA = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `Auth REST Endpoint & Schema #${Date.now().toString().slice(-4)}`,
+          description: "Implement /api/auth/login and user session token schema",
+          ownerId: "agent-backend-codex",
+        }),
+      }).then((r) => r.json());
+
+      const taskB = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `Frontend Login Modal & State #${Date.now().toString().slice(-4)}`,
+          description: "Integrate login dialog with backend token contract",
+          ownerId: "agent-frontend-claude",
+        }),
+      }).then((r) => r.json());
+
+      await fetch(`/api/tasks/${taskA.id}/transition`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetStatus: "running",
+          baseRevision: taskA.revision,
+          ownerId: "agent-backend-codex",
+          reason: "Agent A acknowledged task assignment and started implementation",
+        }),
+      });
+
+      await fetch(`/api/tasks/${taskB.id}/transition`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetStatus: "assigned",
+          baseRevision: taskB.revision,
+          ownerId: "agent-frontend-claude",
+          reason: "Agent B acknowledged assignment (awaiting backend contract handoff)",
+        }),
+      });
+
+      await fetch("/api/patches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: taskA.id,
+          runId: `run-demo-${Date.now()}`,
+          diffContent: "--- a/server/api/auth.ts\n+++ b/server/api/auth.ts\n@@ -0,0 +1,5 @@\n+export const login = () => ({ token: 'jwt_secure_session_token' });",
+          testOutput: "PASS: 4/4 auth unit tests passed in 42ms.",
+        }),
+      });
+
+      await fetch("/api/handoffs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromAgent: "agent-backend-codex",
+          toAgent: "agent-frontend-claude",
+          taskId: taskA.id,
+          dependentTaskId: taskB.id,
+          handoffType: "task_completed",
+          summary: "Auth API endpoints (/api/auth/login) deployed; frontend integration unblocked.",
+          payload: { endpoint: "/api/auth/login", method: "POST", schemaVersion: "1.0.0" },
+        }),
+      });
+
+      refreshData();
+    } catch (err) {
+      console.error("Multi-agent demo failed:", err);
     }
   };
 
@@ -227,6 +337,8 @@ export function App() {
     { key: "done", label: "Done" },
   ];
 
+  const activeProject = projects.length > 0 ? projects[0] : null;
+
   return (
     <div>
       {/* Top Header */}
@@ -234,6 +346,11 @@ export function App() {
         <div className="brand">
           <h1>UPSIDE-DOWN</h1>
           <span>PROTO-G</span>
+          {activeProject && (
+            <span className="badge badge-blue" style={{ fontSize: "0.75rem" }}>
+              📁 {activeProject.name}
+            </span>
+          )}
           <div className="tagline">"Internet chala gaya, par AI coding team ka kaam nahi rukta"</div>
         </div>
 
@@ -252,8 +369,12 @@ export function App() {
             {syncStatus?.isOnline ? "Simulate Offline Mode" : "Restore Online Mode"}
           </button>
 
-          <button className="btn btn-primary" onClick={createSampleTask}>
-            + Trigger Coding Task
+          <button className="btn btn-primary" onClick={runMultiAgentDemo}>
+            🚀 Run 2-Agent Demo
+          </button>
+
+          <button className="btn" onClick={createSampleTask}>
+            + Single Task
           </button>
         </div>
       </header>
@@ -277,7 +398,7 @@ export function App() {
                   </span>
                 </div>
                 <div className="agent-meta">
-                  Role: {agent.id.includes("watcher") ? "File Monitor" : agent.id.includes("repair") ? "Code Repair" : agent.id.includes("sync") ? "Offline Sync" : "Coordinator"}
+                  Role: {agent.id.includes("backend") ? "Backend Agent (Role 1/2)" : agent.id.includes("frontend") ? "Frontend Agent (Role 3)" : agent.id.includes("watcher") ? "File Monitor" : agent.id.includes("repair") ? "Code Repair" : agent.id.includes("sync") ? "Offline Sync" : "Coordinator"}
                 </div>
                 <div className="agent-meta">
                   Active Task: {agent.currentTaskId ? agent.currentTaskId.slice(0, 8) + "..." : "None (Idle)"}
@@ -434,7 +555,39 @@ export function App() {
           </div>
         </div>
 
-        {/* Section 4: Live Activity Timeline */}
+        {/* Section 4: Structured Agent Handoffs */}
+        {handoffs.length > 0 && (
+          <div>
+            <div className="section-title">
+              <span>Structured Agent Handoffs</span>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                {handoffs.length} Cross-Agent Contracts Exchanged
+              </span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "12px", marginBottom: "24px" }}>
+              {handoffs.map((h) => (
+                <div key={h.id} style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "8px", padding: "12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--accent-blue)" }}>
+                      @{h.fromAgent} ➔ @{h.toAgent}
+                    </span>
+                    <span className="badge badge-green" style={{ fontSize: "0.7rem" }}>
+                      {h.handoffType.toUpperCase()}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "0.85rem", color: "var(--text-primary)", marginBottom: "6px" }}>
+                    {h.summary}
+                  </div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    Contract v{h.contractVersion} • {new Date(h.createdAt).toLocaleTimeString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Section 5: Live Activity Timeline */}
         <div>
           <div className="section-title">
             <span>Live Activity Stream (SSE)</span>
