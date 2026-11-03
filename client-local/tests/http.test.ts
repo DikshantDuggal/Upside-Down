@@ -20,6 +20,49 @@ async function fixture(t: any) {
 }
 const cmd = () => ({ type: "task.create", payload: { clientTaskId: randomUUID(), title: "HTTP offline enqueue" } });
 
+test("paired reviewer authorization is verified live with the separate credential and fails closed", async t => {
+  let role = "reviewer", canReview = true, contractVersion = VERSION, status = 200;
+  const received: string[] = [];
+  const upstream = createServer((req, res) => {
+    received.push(req.headers.authorization ?? "");
+    res.writeHead(status, { "Content-Type": "application/json", "X-UD-Contract": VERSION });
+    res.end(JSON.stringify({ contractVersion, authorization: { role, canReview } }));
+  });
+  await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`;
+  t.after(() => { upstream.closeAllConnections(); upstream.close(); });
+  const store = new LocalStore(":memory:");
+  const service = await createLocalService({ store, pairingKey: "x".repeat(64), port: 0, startWorker: false,
+    client: new CoordinatorClient(base, "device-only"), reviewerClient: new CoordinatorClient(base, "reviewer-only") });
+  t.after(async () => { await service.close(); store.close(); });
+  const headers: Record<string, string> = { "X-UD-Contract": VERSION, "Content-Type": "application/json", Origin: service.origin };
+  assert.equal((await fetch(service.origin + "/local/authorization", { headers })).status, 401);
+  assert.equal(received.length, 0);
+  const paired = await fetch(service.origin + "/local/session", { method: "POST", headers, body: JSON.stringify({ pairingKey: "x".repeat(64) }) });
+  headers.Cookie = paired.headers.get("set-cookie")!.split(";")[0];
+  const authorization = async () => {
+    const response = await fetch(service.origin + "/local/authorization", { headers });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    const body = await response.json() as any;
+    assert.equal(body.contractVersion, VERSION);
+    assert.ok(!JSON.stringify(body).includes("reviewer-only"));
+    return body.authorization;
+  };
+  assert.deepEqual(await authorization(), { role: "reviewer", canReview: true });
+  role = "admin"; assert.deepEqual(await authorization(), { role: "admin", canReview: true });
+  role = "device"; assert.equal((await authorization()).canReview, false);
+  role = "reviewer"; canReview = false; assert.equal((await authorization()).canReview, false);
+  canReview = true; contractVersion = "wrong"; assert.equal((await authorization()).canReview, false);
+  contractVersion = VERSION; status = 403; assert.equal((await authorization()).canReview, false);
+  status = 503; assert.equal((await authorization()).canReview, false);
+  assert.ok(received.every(header => header === "Bearer reviewer-only"));
+  const ordinary = await fixture(t);
+  const noReviewer = await fetch(ordinary.service.origin + "/local/authorization", { headers: ordinary.headers });
+  assert.equal(noReviewer.status, 200);
+  assert.equal((await noReviewer.json() as any).authorization.canReview, false);
+});
+
 test("local HTTP enqueues after commit; lost browser response retry returns original receipt", async t => {
   const { service, headers, store } = await fixture(t); const input = cmd(); headers["Idempotency-Key"] = "lost-response";
   const request = () => fetch(`${service.origin}/local/commands`, { method: "POST", headers, body: JSON.stringify(input) });

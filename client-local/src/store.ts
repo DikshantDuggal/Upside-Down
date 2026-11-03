@@ -155,6 +155,9 @@ export class LocalStore {
     this.db.prepare("INSERT INTO entities VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value").run(kind, id, JSON.stringify(value));
   }
   entities(kind: string): any[] { return (this.db.prepare("SELECT value FROM entities WHERE kind=? ORDER BY id").all(kind) as Row[]).map(r => JSON.parse(r.value)); }
+  invalidateCollaborationReads() {
+    this.db.exec("DELETE FROM cache WHERE path='/api/projects' OR path LIKE '/api/projects/%' OR path='/api/handoffs' OR path LIKE '/api/handoffs?%'");
+  }
   cacheRead(path: string) { const row = this.db.prepare("SELECT * FROM cache WHERE path=?").get(path) as Row | undefined; return row ? { body: JSON.parse(row.body), cachedAt: row.cached_at } : undefined; }
   cacheWrite(path: string, body: unknown) {
     this.db.prepare("INSERT INTO cache VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET body=excluded.body,cached_at=excluded.cached_at").run(path, JSON.stringify(body), new Date().toISOString());
@@ -164,6 +167,8 @@ export class LocalStore {
     const change = this.transaction(() => {
       for (const event of page.events) this.db.prepare("INSERT OR IGNORE INTO inbox VALUES(?,?)").run(event.id, JSON.stringify(event));
       for (const snapshot of snapshots) this.entity(snapshot.kind, snapshot.id, snapshot.value);
+      if (page.events.some(event => event.type === "project_created" || event.type === "agent_handoff")) this.invalidateCollaborationReads();
+      for (const snapshot of snapshots) if (snapshot.kind === "patches") this.db.prepare("DELETE FROM cache WHERE path=?").run(`/api/patches/${snapshot.id}`);
       if (snapshots.some(snapshot => snapshot.kind === "tasks")) this.db.exec("DELETE FROM cache WHERE path='/api/tasks' OR path LIKE '/api/tasks?%' OR path LIKE '/api/tasks/%'");
       hook?.();
       if (page.events.length) this.set("epoch", page.events[0].coordinatorEpoch);

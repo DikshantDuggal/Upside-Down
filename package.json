@@ -7,10 +7,10 @@
   "scripts": {
     "start": "node --experimental-strip-types server/index.ts",
     "dev": "node --experimental-strip-types --watch server/index.ts",
-    "build:frontend": "npm run build:demo && npm run build:team",
-    "build": "npm run build:demo && npm run build:team && tsc",
+    "build:frontend": "npm run build:team",
+    "build": "npm run typecheck && npm run build:team",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types server/tests/environment.test.ts && node --experimental-strip-types server/tests/coordinator.test.ts && node --experimental-strip-types server/tests/agentEngine.test.ts && node --experimental-strip-types server/tests/syncOffline.test.ts && node --experimental-strip-types server/tests/dashboardE2E.test.ts && node --experimental-strip-types server/tests/multiAgentDemo.test.ts && node --experimental-strip-types server/tests/frontendReplacement.test.ts && node --experimental-strip-types server/tests/backendAUdic.test.ts && node --experimental-strip-types server/tests/multiComputerIntegration.test.ts",
+    "test": "node --experimental-strip-types server/tests/coordinator.test.ts && node --experimental-strip-types server/tests/agentEngine.test.ts",
     "test:multi-computer": "node --experimental-strip-types server/tests/multiComputerIntegration.test.ts",
     "test:env": "node --experimental-strip-types server/tests/environment.test.ts",
     "test:coordinator": "node --experimental-strip-types server/tests/coordinator.test.ts",
@@ -22,11 +22,24 @@
     "test:demo": "node --experimental-strip-types server/tests/multiAgentDemo.test.ts",
     "demo": "node --experimental-strip-types server/tests/multiAgentDemo.test.ts",
     "build:demo": "esbuild apps/demo-frontend/src/index.tsx --bundle --outfile=public/demo/app.js --minify",
-    "build:team": "esbuild frontend/src/index.tsx --bundle --outfile=public/team/app.js --minify",
+    "build:team": "npm --prefix web run build",
     "frontend:status": "node scripts/frontend-manager.js status",
     "frontend:activate": "node scripts/frontend-manager.js activate",
     "frontend:rollback": "node scripts/frontend-manager.js rollback",
-    "test:replacement": "node --experimental-strip-types server/tests/frontendReplacement.test.ts"
+    "test:replacement": "node --test --test-name-pattern \"official frontend activation\" server/api/__tests__/launch.test.ts",
+    "test:contract": "node --experimental-strip-types --test server/core/__tests__/durability.test.ts server/core/__tests__/syncGateway.test.ts server/api/__tests__/eventReplay.test.ts server/api/__tests__/authProtocol.test.ts server/agents/__tests__/safety.test.ts server/agents/__tests__/jobs.test.ts server/api/__tests__/integration.test.ts",
+    "enroll": "node --experimental-strip-types server/api/enroll.ts",
+    "dev:all": "node scripts/dev-all.mjs",
+    "device:init": "node scripts/dev-all.mjs --init-device",
+    "dev:peer": "node scripts/dev-all.mjs",
+    "test:launch": "node --test server/api/__tests__/launch.test.ts",
+    "test:browser-live": "node scripts/test-launch-browser.mjs",
+    "stop:all": "node scripts/stop-all.mjs",
+    "demo:new": "node scripts/new-demo.mjs",
+    "test:live-execution": "node scripts/test-live-execution.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "test:collaboration-browser": "node scripts/test-collaboration-browser.mjs",
+    "test:rollback-live": "node scripts/test-live-rollback.mjs"
   },
   "keywords": [
     "offline-first",
@@ -50,5 +63,9 @@
     "@types/react-dom": "^19.3.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=24.20.0",
+    "npm": ">=11.19.0"
   }
 }

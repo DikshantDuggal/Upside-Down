@@ -25,17 +25,37 @@ function json(res: ServerResponse, status: number, body: unknown) {
 }
 function same(a: string, b: string) { const aa = Buffer.from(a); const bb = Buffer.from(b); return aa.length === bb.length && timingSafeEqual(aa, bb); }
 
+
+function validateCollaboration(route: string, body: Record<string, unknown>) {
+  const project = route === "/api/projects";
+  const allowed = project ? ["id", "name", "description"] : ["fromAgent", "toAgent", "taskId", "dependentTaskId", "handoffType", "summary", "payload"];
+  if (Object.keys(body).some(key => !allowed.includes(key))) throw new ProtocolError(400, "UNKNOWN_FIELD", "Unexpected collaboration field");
+  const text = (value: unknown, max: number, required = true) => {
+    if (value === undefined && !required) return;
+    if (typeof value !== "string" || value.length > max || (required && !value.trim())) throw new ProtocolError(400, "INVALID_STRING", "Invalid collaboration text length");
+  };
+  if (project) { text(body.name, 200); text(body.description, 16384, false); if (body.id !== undefined) uuid(body.id); }
+  else {
+    text(body.fromAgent, 200); text(body.toAgent, 200); text(body.summary, 2048);
+    for (const field of ["taskId", "dependentTaskId"]) if (body[field] !== undefined) uuid(body[field]);
+    if (body.handoffType !== undefined && !["task_completed", "review_requested", "blocked_dependency", "context_sharing"].includes(body.handoffType as string)) throw new ProtocolError(400, "INVALID_HANDOFF_TYPE", "Unknown handoff type");
+    if (body.payload !== undefined) { object(body.payload); if (Buffer.byteLength(JSON.stringify(body.payload)) > 32768) throw new ProtocolError(413, "PAYLOAD_TOO_LARGE", "Handoff context exceeds 32768 bytes"); }
+  }
+}
+
 /** Exact route allowlist. There is no URL supplied by the browser and no arbitrary forwarding target. */
 export function readProxyPath(url: URL): string | undefined {
   const path = url.pathname;
-  const list = new Map<string, string[]>([["/api/health", []], ["/api/capabilities", []], ["/api/tasks", ["status"]], ["/api/agents", []], ["/api/events", ["taskId", "since", "limit"]], ["/api/events/stream", ["after", "contractVersion"]], ["/api/sync/conflicts", ["status", "after"]]]);
+  const list = new Map<string, string[]>([["/api/health", []], ["/api/capabilities", []], ["/api/projects", []], ["/api/handoffs", ["toAgent", "taskId"]], ["/api/tasks", ["status"]], ["/api/agents", []], ["/api/events", ["taskId", "since", "limit"]], ["/api/events/stream", ["after", "contractVersion"]], ["/api/sync/conflicts", ["status", "after"]]]);
   let allowed = list.get(path);
   if (!allowed) {
+    if (/^\/api\/projects\/[^/]+$/.test(path)) { if (url.search) throw new ProtocolError(400, 'INVALID_QUERY', 'Project detail does not accept query parameters'); uuid(path.split('/').at(-1)); return path; }
     const match = path.match(/^\/api\/(tasks|patches|runs|applications)\/([^/]+)(?:\/(patches|checkpoints))?$/);
     if (!match || (match[3] && match[1] !== "tasks")) return undefined;
     uuid(match[2]); allowed = [];
   }
   for (const key of url.searchParams.keys()) if (!allowed.includes(key) || url.searchParams.getAll(key).length !== 1) throw new ProtocolError(400, "INVALID_QUERY", "Unsupported or repeated query parameter");
+  if (url.searchParams.has("toAgent") && (url.searchParams.get("toAgent")!.length > 200 || !url.searchParams.get("toAgent")!.trim())) throw new ProtocolError(400, "INVALID_QUERY", "Invalid recipient agent");
   if (url.searchParams.has("taskId")) uuid(url.searchParams.get("taskId"));
   if (url.searchParams.has("limit") && (!/^\d+$/.test(url.searchParams.get("limit")!) || Number(url.searchParams.get("limit")) < 1 || Number(url.searchParams.get("limit")) > 200)) throw new ProtocolError(400, "INVALID_QUERY", "limit must be 1..200");
   if (url.searchParams.has("status")) {
@@ -80,6 +100,20 @@ export async function createLocalService(options: LocalOptions) {
       if (!session || session.expires < Date.now()) throw new ProtocolError(401, "LOCAL_SESSION_REQUIRED", "Pair this browser with the local service");
       if (write && (typeof req.headers["x-csrf-token"] !== "string" || !same(req.headers["x-csrf-token"], session.csrf))) throw new ProtocolError(403, "CSRF_REQUIRED", "Valid X-CSRF-Token required");
       if (url.pathname === "/local/session" && req.method === "GET") { json(res, 200, { contractVersion: VERSION, csrfToken: session.csrf }); return; }
+      if (url.pathname === "/local/authorization" && req.method === "GET") {
+        // Never infer authority from pairing, a configured filename or cached capabilities.
+        let authorization = { role: "device", canReview: false };
+        if (options.reviewerClient) {
+          try {
+            const capabilities = await options.reviewerClient.request("/api/capabilities");
+            const verified = capabilities?.authorization;
+            if (capabilities?.contractVersion === VERSION && verified?.canReview === true && ["reviewer", "admin"].includes(verified.role)) {
+              authorization = { role: verified.role, canReview: true };
+            }
+          } catch { /* Unreachable, revoked or malformed authority cannot grant browser rights. */ }
+        }
+        json(res, 200, { contractVersion: VERSION, authorization }); return;
+      }
       if (url.pathname === "/local/health" && req.method === "GET") { json(res, 200, store.health()); return; }
       if (url.pathname === "/local/state" && req.method === "GET") { json(res, 200, store.state()); return; }
       if (url.pathname === "/local/commands" && req.method === "POST") {
@@ -141,17 +175,21 @@ export async function createLocalService(options: LocalOptions) {
       }
       if (req.method === "POST") {
         const registry = url.pathname === "/api/agents/register";
+        const collaboration = url.pathname === "/api/projects" || url.pathname === "/api/handoffs";
         const action = url.pathname.match(/^\/api\/(?:patches\/([^/]+)\/(approve|reject|apply)|tasks\/([^/]+)\/runs|runs\/([^/]+)\/cancel|sync\/conflicts\/([^/]+)\/resolve)$/);
-        if (registry || action) {
+        if (registry || collaboration || action) {
           if (url.search) throw new ProtocolError(400, "INVALID_QUERY", "Online action routes do not accept query parameters");
           if (action) uuid(action[1] ?? action[3] ?? action[4] ?? action[5]);
-          const online = registry ? client : options.reviewerClient;
-          if (!online) throw new ProtocolError(503, registry ? "COORDINATOR_UNREACHABLE" : "REVIEWER_SESSION_UNAVAILABLE", registry ? "Coordinator is not configured" : "A separately enrolled reviewer credential must be configured for this local service");
+          const deviceAction = registry || collaboration;
+          const online = deviceAction ? client : options.reviewerClient;
+          if (!online) throw new ProtocolError(503, deviceAction ? "COORDINATOR_UNREACHABLE" : "REVIEWER_SESSION_UNAVAILABLE", deviceAction ? "Coordinator is not configured" : "A separately enrolled reviewer credential must be configured for this local service");
           const input = await readJson(req); object(input);
+          if (collaboration) validateCollaboration(url.pathname, input);
           const key = req.headers["idempotency-key"];
           if (typeof key !== "string" || !key || key.length > 200) throw new ProtocolError(400, "IDEMPOTENCY_KEY_REQUIRED", "Online writes require a stable Idempotency-Key");
           // Exactly one attempt. Ambiguous failures stay online-only and must be reconciled with A.
           const result = await online.requestResult(url.pathname, { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+          if (collaboration) store.invalidateCollaborationReads();
           json(res, result.status, result.body); return;
         }
       }

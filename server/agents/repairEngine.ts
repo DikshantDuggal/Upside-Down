@@ -8,6 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import type { AgentRunRequest, AgentRunResult, RepairOptions } from "../../contracts/agent.ts";
 import { TestRunner, type TestRunResult } from "../workers/testRunner.ts";
+import { resolveSourceFile, isTestPath, validateSourcePath } from "../workers/pathPolicy.ts";
+import { PatchReviewEngine } from "./reviewEngine.ts";
 
 export interface RepairProvider {
   name: string;
@@ -64,11 +66,15 @@ export class RepairEngine {
 
   constructor(options?: Partial<RepairOptions>, provider?: RepairProvider) {
     this.options = {
-      maxAttempts: options?.maxAttempts || 3,
-      timeoutMs: options?.timeoutMs || 15000,
-      allowedExtensions: options?.allowedExtensions || [".ts", ".js", ".json", ".py", ".rs"],
+      maxAttempts: options?.maxAttempts ?? 3,
+      timeoutMs: options?.timeoutMs ?? 15000,
+      allowedExtensions: options?.allowedExtensions ?? [".ts", ".js", ".cjs", ".mjs", ".json", ".py", ".rs"],
       worktreeDir: options?.worktreeDir,
     };
+    if (!Number.isSafeInteger(this.options.maxAttempts) || this.options.maxAttempts < 1 || this.options.maxAttempts > 3
+        || !Number.isSafeInteger(this.options.timeoutMs) || this.options.timeoutMs < 1 || this.options.timeoutMs > 120000) {
+      throw new RangeError("Repair requires 1..3 attempts and a bounded test timeout");
+    }
     this.provider = provider || new OfflineHeuristicRepairProvider();
     this.testRunner = new TestRunner(this.options.timeoutMs);
   }
@@ -76,21 +82,10 @@ export class RepairEngine {
   public async executeRepair(
     req: AgentRunRequest,
     targetFile: string,
-    testCommand: string
+    testCommand: string | { command: string; args: string[]; signal?: AbortSignal; env?: NodeJS.ProcessEnv; inheritEnvironment?: boolean }
   ): Promise<AgentRunResult> {
     const startTime = Date.now();
     let attempts = 0;
-
-    const absTargetFile = path.resolve(req.workspacePath, targetFile);
-    if (!fs.existsSync(absTargetFile)) {
-      return {
-        runId: req.runId,
-        status: "failed",
-        error: `Target file not found: ${targetFile}`,
-        durationMs: Date.now() - startTime,
-        attempts: 0,
-      };
-    }
 
     // Safety: Protect test files from unauthorized self-tampering
     if (this.isTestFile(targetFile)) {
@@ -103,12 +98,27 @@ export class RepairEngine {
       };
     }
 
+    let absTargetFile: string;
+    try {
+      absTargetFile = resolveSourceFile(req.workspacePath, targetFile);
+      if (!this.options.allowedExtensions.includes(path.extname(targetFile).toLowerCase())) throw new Error("Unsupported source extension");
+      if (fs.statSync(absTargetFile).size > 512 * 1024) throw new Error("Source exceeds candidate size limit");
+    } catch {
+      return { runId: req.runId, status: "blocked", error: "Source path is unavailable, unsafe, protected or oversized",
+        durationMs: Date.now() - startTime, attempts: 0 };
+    }
+
     const originalCode = fs.readFileSync(absTargetFile, "utf-8");
     let currentCode = originalCode;
     let lastError = req.testOutput || "Test failed";
     let generatedDiff = "";
     let verificationOutput = "";
+    let writtenCode: string | undefined;
 
+    try {
+    if (!await this.provider.isAvailable()) {
+      return { runId: req.runId, status: "blocked", error: "Repair provider is unavailable", attempts: 0, durationMs: Date.now() - startTime };
+    }
     while (attempts < this.options.maxAttempts) {
       attempts++;
 
@@ -123,26 +133,36 @@ export class RepairEngine {
         // No further changes proposed
         break;
       }
+      if (typeof fixedCode !== "string" || Buffer.byteLength(fixedCode) > 512 * 1024) {
+        throw new Error("Provider candidate exceeds source limit");
+      }
 
       // 2. Compute unified diff
       generatedDiff = this.createUnifiedDiff(targetFile, originalCode, fixedCode);
+      if (Buffer.byteLength(generatedDiff) > 512 * 1024) throw new Error("Candidate diff exceeds limit");
+      if (!new PatchReviewEngine().reviewPatch(generatedDiff).safe) {
+        return { runId: req.runId, status: "blocked", error: "Patch review blocked candidate before execution",
+          durationMs: Date.now() - startTime, attempts };
+      }
 
       // 3. Apply fix temporarily to test workspace
+      if (resolveSourceFile(req.workspacePath, targetFile) !== absTargetFile || fs.readFileSync(absTargetFile, "utf8") !== currentCode) {
+        throw new Error("Workspace changed while generating candidate");
+      }
       fs.writeFileSync(absTargetFile, fixedCode, "utf-8");
+      writtenCode = fixedCode;
 
       // 4. Verify candidate fix by running tests
       const testResult: TestRunResult = await this.testRunner.run({
         cwd: req.workspacePath,
-        command: testCommand,
+        ...(typeof testCommand === "string" ? { command: testCommand } : testCommand),
         timeoutMs: this.options.timeoutMs,
       });
 
       verificationOutput = testResult.combinedOutput;
 
       if (testResult.passed) {
-        // Fix verified! Revert workspace so patch is subject to human approval
-        fs.writeFileSync(absTargetFile, originalCode, "utf-8");
-
+        // finally restores the source before this result reaches the caller.
         return {
           runId: req.runId,
           status: "completed",
@@ -159,9 +179,6 @@ export class RepairEngine {
       currentCode = fixedCode;
     }
 
-    // Revert original code on failure
-    fs.writeFileSync(absTargetFile, originalCode, "utf-8");
-
     return {
       runId: req.runId,
       status: "failed",
@@ -172,47 +189,41 @@ export class RepairEngine {
       durationMs: Date.now() - startTime,
       attempts,
     };
+    } catch {
+      return { runId: req.runId, status: "failed", error: "Repair provider or candidate verification failed",
+        durationMs: Date.now() - startTime, attempts };
+    } finally {
+      if (writtenCode !== undefined) {
+        try {
+          if (resolveSourceFile(req.workspacePath, targetFile) !== absTargetFile || fs.readFileSync(absTargetFile, "utf8") !== writtenCode) {
+            throw new Error("Workspace was modified independently");
+          }
+          fs.writeFileSync(absTargetFile, originalCode, "utf8");
+        } catch {
+          // A successful result must never escape when restoration failed. Do not
+          // overwrite independent changes or follow a replaced link during cleanup.
+          return { runId: req.runId, status: "blocked", error: "Workspace restoration blocked; manual recovery required",
+            durationMs: Date.now() - startTime, attempts };
+        }
+      }
+    }
   }
 
   public isTestFile(filePath: string): boolean {
-    const normalized = filePath.replace(/\\/g, "/");
-    return (
-      normalized.includes("/tests/") ||
-      normalized.includes("/test/") ||
-      normalized.includes(".test.") ||
-      normalized.includes(".spec.")
-    );
+    return isTestPath(filePath);
   }
 
   public createUnifiedDiff(filename: string, oldStr: string, newStr: string): string {
-    const oldLines = oldStr.split("\n");
-    const newLines = newStr.split("\n");
-
-    const diffLines: string[] = [
-      `--- a/${filename}`,
-      `+++ b/${filename}`,
-      `@@ -1,${oldLines.length} +1,${newLines.length} @@`,
-    ];
-
-    // Simple line-by-line diff
-    const max = Math.max(oldLines.length, newLines.length);
-    for (let i = 0; i < max; i++) {
-      const o = oldLines[i];
-      const n = newLines[i];
-      if (o !== undefined && n !== undefined) {
-        if (o === n) {
-          diffLines.push(` ${o}`);
-        } else {
-          diffLines.push(`-${o}`);
-          diffLines.push(`+${n}`);
-        }
-      } else if (o !== undefined) {
-        diffLines.push(`-${o}`);
-      } else if (n !== undefined) {
-        diffLines.push(`+${n}`);
-      }
+    validateSourcePath(filename);
+    if (oldStr === newStr) return "";
+    const lines = (value: string) => value === "" ? [] : value.split("\n").slice(0, value.endsWith("\n") ? -1 : undefined);
+    const oldLines = lines(oldStr), newLines = lines(newStr);
+    const diff = [`--- a/${filename}`, `+++ b/${filename}`,
+      `@@ -${oldLines.length ? 1 : 0},${oldLines.length} +${newLines.length ? 1 : 0},${newLines.length} @@`];
+    for (const [prefix, value, source] of [["-", oldLines, oldStr], ["+", newLines, newStr]] as const) {
+      for (const line of value) diff.push(prefix + line);
+      if (value.length && !source.endsWith("\n")) diff.push("\\ No newline at end of file");
     }
-
-    return diffLines.join("\n");
+    return diff.join("\n") + "\n";
   }
 }

@@ -90,12 +90,20 @@ export class SyncWorker {
       if (!Array.isArray(agents)) throw new ProtocolError(502, "INVALID_AGENTS", "Expected agent snapshots");
       for (const agent of agents) { object(agent); if (typeof agent.id !== "string") throw new ProtocolError(502, "INVALID_AGENT", "Invalid agent snapshot"); snapshots.push({ kind: "agents", id: agent.id, value: agent }); }
     }
+    const patchIds = new Set<string>();
     for (const e of page.events) {
-      if (typeof e.payload.patchId === "string") {
-        uuid(e.payload.patchId); const patch = await this.client.request(`/api/patches/${e.payload.patchId}`);
-        object(patch); if (patch.id !== e.payload.patchId) throw new ProtocolError(502, "INVALID_PATCH", "Patch identity mismatch");
-        snapshots.push({ kind: "patches", id: e.payload.patchId, value: patch });
+      const application = e.type === "patch_application_changed" ? e.payload.application as { patchId?: unknown } | undefined : undefined;
+      const run = e.type === "run_changed" ? e.payload.run as { patchId?: unknown } | undefined : undefined;
+      for (const id of [e.payload.patchId, application?.patchId, run?.patchId]) {
+        if (typeof id === "string") { uuid(id); patchIds.add(id); }
       }
+    }
+    for (const id of patchIds) {
+      const patch = await this.client.request(`/api/patches/${id}`);
+      object(patch); if (patch.id !== id) throw new ProtocolError(502, "INVALID_PATCH", "Patch identity mismatch");
+      snapshots.push({ kind: "patches", id, value: patch });
+    }
+    for (const e of page.events) {
       if (e.type === "message_sent" || e.type === "message.sent") {
         // A must supply a complete Message in payload.message; no message GET exists in UD-IC/1.0.
         const message = e.payload.message as Message; object(message); uuid(message.id); uuid(message.eventId); uuid(message.senderDeviceId);

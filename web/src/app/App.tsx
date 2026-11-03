@@ -41,6 +41,7 @@ import { TaskDetail, TaskList, NewTask } from "../features/Tasks";
 import { PatchDetail, PatchList } from "../features/patches";
 import { ConflictDetail, ConflictList } from "../features/Conflicts";
 import { Network } from "../features/Network";
+import { Projects, Handoffs } from "../features/Collaboration";
 import { Messages } from "../features/Messages";
 import {
   CommandJournal,
@@ -58,6 +59,8 @@ import {
 
 const pages = [
   { id: "overview", label: "Overview", Icon: LayoutDashboard },
+  { id: "projects", label: "Projects", Icon: FileCode2 },
+  { id: "handoffs", label: "Handoffs", Icon: CheckCheck },
   { id: "tasks", label: "Tasks", Icon: ListTodo },
   { id: "agents", label: "Agents", Icon: Bot },
   { id: "activity", label: "Activity", Icon: Activity },
@@ -76,6 +79,17 @@ const copy: Record<
     title: "Good things happen together.",
     description:
       "One place for your team, your agents, and everything in motion.",
+  },
+  projects: {
+    eyebrow: "SHARED DIRECTION",
+    title: "Give your work a home.",
+    description: "Real project records, shared through your local service.",
+  },
+  handoffs: {
+    eyebrow: "MAKE THE NEXT STEP CLEAR",
+    title: "Shared context. Clear ownership.",
+    description:
+      "Registered agents, task handoffs, and recipient acknowledgements.",
   },
   tasks: {
     eyebrow: "MAKE PROGRESS VISIBLE",
@@ -730,6 +744,8 @@ export function App() {
               )}
             </>
           )}
+          {page === "projects" && <Projects data={data} />}
+          {page === "handoffs" && <Handoffs data={data} />}
           {page === "messages" && (
             <Messages
               messages={data.messages}

@@ -1,3 +1,30 @@
+# Upside-Down: launch the integrated application
+
+Use Node 24.20+ and npm 11.19+. From this release checkout:
+
+```powershell
+npm install
+npm --prefix web ci
+npm run dev:all
+```
+
+The official `web/` app is served on 127.0.0.1:5173 through the local service on
+4100 and authenticated coordinator on 4000. Occupied ports are reported without
+terminating their owners. Select another coordinator port with
+`npm run dev:all -- --coordinator-port 4001`.
+
+For a separately enrolled local reviewer and a disposable Git repair fixture:
+`npm run dev:all -- --coordinator-port 4001 --reviewer --demo-workspace --open`.
+This never registers your active source checkout as an execution target.
+
+Setup, pairing, stop/restart, rollback and Computer B instructions are in
+[the verified launch guide](docs/FINAL_LAUNCH_GUIDE.md).
+Physical Computer B verification remains pending. Recurring GitHub monitoring stays disabled.
+
+---
+
+The original board setup documentation is preserved below.
+
 # Hackathon agent board
 
 ![The hacking floor at Cal Hacks](docs/banner.jpg)

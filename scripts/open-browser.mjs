@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { chromium } from '../web/node_modules/@playwright/test/index.mjs';
+const [state, origin] = process.argv.slice(2);
+const browser = await chromium.launchPersistentContext(path.join(state, 'browser-profile'), { headless: false, viewport: null });
+process.on('message', message => { if (message === 'upside-down:shutdown') { process.disconnect?.(); void browser.close(); } });
+const page = browser.pages()[0] ?? await browser.newPage();
+await page.goto(origin);
+const pairingKey = JSON.parse(fs.readFileSync(path.join(state, 'device.db.session.json'), 'utf8')).pairingKey;
+const openPair = page.getByRole('button', { name: 'Pair browser' }).first();
+await openPair.click();
+await page.getByLabel('Local pairing key').fill(pairingKey);
+await page.getByRole('dialog').getByRole('button', { name: 'Pair browser', exact: true }).click();
+await page.getByRole('dialog').waitFor({ state: 'hidden', timeout: 15000 });

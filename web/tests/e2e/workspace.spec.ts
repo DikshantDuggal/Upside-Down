@@ -10,8 +10,10 @@ import {
   task,
 } from "../fixtures";
 
+const fixtureOrigin = `http://127.0.0.1:${Number(process.env.UD_TEST_WEB_PORT ?? 5173)}`;
+
 async function mockServices(page: Page, state = localState) {
-  await page.route("http://127.0.0.1:5173/local/**", async (route) => {
+  await page.route(`${fixtureOrigin}/local/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/events/stream")) return route.abort();
     if (path === "/local/state")
@@ -24,7 +26,7 @@ async function mockServices(page: Page, state = localState) {
       json: { message: "Test fixture route not provided" },
     });
   });
-  await page.route("http://127.0.0.1:5173/api/**", async (route) => {
+  await page.route(`${fixtureOrigin}/api/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/events/stream")) return route.abort();
     if (path === "/api/capabilities")
@@ -122,10 +124,10 @@ test("fixture UI: lost local response retries identical key after browser reload
 test("fixture UI: disconnected services never claim a task was queued", async ({
   page,
 }) => {
-  await page.route("http://127.0.0.1:5173/local/**", (route) =>
+  await page.route(`${fixtureOrigin}/local/**`, (route) =>
     route.fulfill({ status: 503, body: "Unavailable" }),
   );
-  await page.route("http://127.0.0.1:5173/api/**", (route) =>
+  await page.route(`${fixtureOrigin}/api/**`, (route) =>
     route.fulfill({ status: 503, body: "Unavailable" }),
   );
   await page.goto("/");
@@ -147,19 +149,28 @@ test("fixture UI: stale conflict resolution refreshes revisions without automati
   page,
 }) => {
   await mockServices(page, { ...localState, conflicts: [conflict] });
+  await page.route(`${fixtureOrigin}/local/authorization`, (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: CONTRACT,
+        authorization: { role: "reviewer", canReview: true },
+      },
+      headers: { "X-UD-Contract": CONTRACT },
+    }),
+  );
   let currentRevision = 3;
   const proposals: Record<string, unknown>[] = [];
-  await page.route(`http://127.0.0.1:5173/api/tasks/${task.id}`, (route) =>
+  await page.route(`${fixtureOrigin}/api/tasks/${task.id}`, (route) =>
     route.fulfill({ json: { ...task, revision: currentRevision } }),
   );
-  await page.route("http://127.0.0.1:5173/api/sync/conflicts?*", (route) =>
+  await page.route(`${fixtureOrigin}/api/sync/conflicts?*`, (route) =>
     route.fulfill({
       json: { items: [conflict], hasMore: false },
       headers: { "X-UD-Contract": CONTRACT },
     }),
   );
   await page.route(
-    "http://127.0.0.1:5173/api/sync/conflicts/conflict-1/resolve",
+    `${fixtureOrigin}/api/sync/conflicts/conflict-1/resolve`,
     (route) => {
       proposals.push(route.request().postDataJSON());
       currentRevision = 4;

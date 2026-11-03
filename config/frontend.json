@@ -1,5 +1,5 @@
 {
-  "activeFrontend": "demo",
+  "activeFrontend": "team",
   "availableFrontends": {
     "demo": {
       "id": "demo",
@@ -15,15 +15,15 @@
       "id": "team",
       "name": "Upside-Down Official Team Frontend",
       "version": "1.0.0",
-      "sourceDir": "frontend",
-      "distDir": "public/team",
-      "bundleFile": "public/team/app.js",
-      "htmlFile": "public/team/index.html",
+      "sourceDir": "web",
+      "distDir": "web/dist",
+      "bundleFile": "web/dist/index.html",
+      "htmlFile": "web/dist/index.html",
       "description": "Official team implementation developed by assigned frontend engineer."
     }
   },
-  "previousFrontend": "team",
-  "lastActivatedAt": "2026-11-03T20:39:08.700Z",
-  "lastActivationResult": "SUCCESS: Rolled back to Upside-Down Premium Demo Frontend (demo).",
+  "previousFrontend": "demo",
+  "lastActivatedAt": null,
+  "lastActivationResult": "Official web frontend is the default; startup validates its actual build.",
   "rollbackAvailable": true
 }

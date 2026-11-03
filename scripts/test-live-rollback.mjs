@@ -1,0 +1,52 @@
+// Actual browser rollback with independent A/B databases and temporary selection state.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import net from 'node:net';
+import { tmpdir } from 'node:os';
+import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
+import { createServer } from '../server/index.ts';
+import { FrontendController } from '../server/core/frontendController.ts';
+import { LocalStore } from '../client-local/src/store.ts';
+import { CoordinatorClient } from '../client-local/src/transport.ts';
+import { createLocalService } from '../client-local/src/server.ts';
+import { startWebHost } from './web-host.mjs';
+import { chromium, expect } from '../web/node_modules/@playwright/test/index.mjs';
+const root = path.resolve(import.meta.dirname, '..'), scratch = fs.mkdtempSync(path.join(tmpdir(), 'ud-rollback-'));
+let coordinator, remote, store, local, host, browser;
+try {
+ const reserve = net.createServer(); reserve.listen(0, '127.0.0.1'); await once(reserve, 'listening'); const port = reserve.address().port;
+ await new Promise(resolve => reserve.close(resolve)); const origin = `http://127.0.0.1:${port}`;
+ coordinator = createServer(path.join(scratch, 'coordinator.db'), { authenticate: true, sseReplay: true });
+ remote = coordinator.app.listen(0, '127.0.0.1'); await once(remote, 'listening');
+ const title = `ROLLBACK FIXTURE ${randomUUID()}`; coordinator.coordinator.createTask({title});
+ store = new LocalStore(path.join(scratch, 'device.db'));
+ const token = coordinator.auth.enroll(store.deviceId).token, pairingKey = randomUUID();
+ local = await createLocalService({ store, client: new CoordinatorClient(`http://127.0.0.1:${remote.address().port}`, token), pairingKey, port: 0, allowedOrigins: [origin] });
+ const configPath = path.join(scratch, 'frontend.json'), controller = new FrontendController(root, configPath);
+ host = await startWebHost({ port, localOrigin: local.origin, configPath });
+ browser = await chromium.launch({headless:true}); const page = await browser.newPage();
+ await page.goto(origin); await page.getByRole('button',{name:'Pair browser',exact:true}).click();
+ await page.getByLabel('Local pairing key',{exact:true}).fill(pairingKey);
+ await page.getByRole('dialog').getByRole('button',{name:'Pair browser',exact:true}).click();
+ await expect(page.getByRole('dialog')).toHaveCount(0);
+ await page.getByRole('link',{name:'Tasks',exact:true}).click(); await expect(page.getByText(title,{exact:true}).first()).toBeVisible({timeout:20000});
+ assert.equal(controller.rollbackFrontend().success, true);
+ await page.goto(origin);
+ await expect(page.getByText(/Read-only rollback view:/)).toBeVisible();
+ await page.getByRole('button',{name:/Kanban Tasks/}).click(); await expect(page.getByText(title,{exact:true}).first()).toBeVisible({timeout:15000});
+ assert.equal(await page.getByRole('button',{name:/Create Task/}).first().isDisabled(),true);
+ assert.equal(coordinator.coordinator.listTasks().length,1);
+ assert.equal(controller.activateTeamFrontend().success,true);
+ await page.goto(origin); await page.getByRole('link',{name:'Tasks',exact:true}).click();
+ await expect(page.getByText(title,{exact:true}).first()).toBeVisible({timeout:15000});
+ assert.equal(coordinator.coordinator.listTasks().length,1);
+ fs.writeFileSync(path.join(root,'.board/evidence/live-rollback.json'),JSON.stringify({status:'PASS',testedAt:new Date().toISOString(),checks:['official app sees actual task','rollback browser loads demo assets','same actual task visible through authenticated B','legacy mutation controls disabled','official restored without data loss']},null,2));
+ console.log('PASS: actual browser official -> read-only demo -> official with real A/B task data preserved.');
+} finally {
+ await browser?.close(); await host?.close(); await local?.close(); store?.close();
+ if(remote){remote.closeAllConnections();await new Promise(resolve=>remote.close(resolve));}coordinator?.db.close();
+ assert.equal(path.dirname(scratch),path.resolve(tmpdir()));assert.ok(path.basename(scratch).startsWith('ud-rollback-'));fs.rmSync(scratch,{recursive:true,force:true});
+}
+

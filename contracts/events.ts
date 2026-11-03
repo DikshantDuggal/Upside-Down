@@ -1,6 +1,6 @@
 /**
  * Canonical Event Contract
- * Protocol Version: 1.0 (Four-Agent Protocol) / Integration Baseline: UD-IC/1.0
+ * Protocol Version: 1.0 (Four-Agent Protocol)
  * Primary Owner: Role 1 — Core Backend & Coordinator
  */
 
@@ -15,6 +15,9 @@ export interface ActivityEvent {
   payload: Record<string, unknown>;
 }
 
+export type EventCallback = (event: ActivityEvent) => void;
+
+/** Additive durable journal metadata; legacy wire fields remain unchanged. */
 export interface CanonicalEvent extends ActivityEvent {
   contractVersion: "UD-IC/1.0";
   cursor: string;
@@ -24,4 +27,10 @@ export interface CanonicalEvent extends ActivityEvent {
   originSequence?: number;
 }
 
-export type EventCallback = (event: ActivityEvent | CanonicalEvent) => void;
+export interface EventPage {
+  contractVersion: "UD-IC/1.0";
+  events: CanonicalEvent[];
+  nextCursor: string;
+  hasMore: boolean;
+  serverTime: string;
+}

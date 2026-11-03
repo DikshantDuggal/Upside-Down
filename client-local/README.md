@@ -1,9 +1,36 @@
 # Backend B: local durability and synchronization
 
 Implementation for issue #5, branch `5-backend-b-sync`, contract **UD-IC/1.0**.
-This is an integration foundation. Backend A's production gateway, enrollment,
-reviewer sessions, and the frontend handshake still need joint runtime integration.
-Do not advertise the complete sync MVP as verified yet.
+The canonical backend and dashboard are now integrated on main. See
+`INTEGRATION.md` for the merge checkpoints and `WEBSITE_VALIDATION.md` for current
+browser verification and runtime fixes. Physical multi-laptop LAN acceptance is
+still separate from the loopback checks.
+
+## Run the combined website
+
+With root, client-local, server/sync and web dependencies installed:
+
+```powershell
+node client-local/scripts/start-website.mjs
+# Optional, on a trusted reviewer's local development instance:
+node client-local/scripts/start-website.mjs --reviewer
+```
+
+Open `http://127.0.0.1:5173` and pair using the private file whose path is printed.
+The helper starts authenticated A, B and Vite on loopback ports 4000/4100/5173,
+using separate persistent data under ignored `.board/website-runtime`. Windows
+ACLs restrict this directory to the current account. It does not use or replace
+the repository's existing `data/` databases. Set `PORT`, `UD_LOCAL_PORT`,
+`UD_WEB_PORT` or `UD_WEBSITE_DATA` to use different ports/data. An occupied port
+causes startup to stop; it never kills the occupying process. For example, this
+laptop uses `PORT=4001` because 4000 belongs to another coordinator.
+
+`--reviewer` enrolls a separate reviewer credential for this development instance;
+the default never grants reviewer rights. Execution additionally requires a trusted
+`UD_WORKSPACE_CONFIG` as described in `server/core/BACKEND_A_HANDOFF.md`. Without
+that configuration the UI correctly reports execution unavailable. Stop with
+Ctrl+C when running interactively. Pairing and credentials remain private, and
+restart preserves device identity and queued commands.
 
 ## Scope and current behavior
 
@@ -125,8 +152,14 @@ the device credential; run controls, patch decisions/application and conflict re
 require a separate reviewer/admin credential, following A's accepted convention. Configure
 `UD_REVIEWER_TOKEN_FILE` to a private file containing that separately enrolled token only
 on a reviewer's local service. It must differ from `UD_DEVICE_TOKEN_FILE`. Configuring it
-grants online reviewer actions to this service's paired browsers; the frontend's trusted
-host may then set `canReview:true`. A still enforces the credential's actual role/scope.
+allows the local service to probe A's actual authorization. After pairing, GET
+`/local/authorization` returns `{contractVersion,authorization:{role,canReview}}`.
+B requests A's `/api/capabilities` using that separate reviewer credential and
+grants only an explicit reviewer/admin result under UD-IC/1.0. Missing, revoked,
+malformed or unreachable authority returns `canReview:false`; no cached grant is
+used. The route requires the local cookie and contract header. The existing exact
+GET/POST `/local/session` response stays unchanged. Frontend rechecks at pairing,
+reload, window focus and every 30 seconds. A enforces role/revocation on every action.
 
 Without that credential, reviewer actions return 503 `REVIEWER_SESSION_UNAVAILABLE`.
 Online actions require a stable Idempotency-Key and preserve the upstream success status.

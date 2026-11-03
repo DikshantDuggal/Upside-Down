@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 test.use({ trace: "off" });
 test("real B service: browser pairing, local durable enqueue, restart and receipt recovery", async ({
   page,
+  baseURL,
 }) => {
   test.skip(
     !process.env.UD_REAL_LOCAL_ROOT,
@@ -17,6 +18,8 @@ test("real B service: browser pairing, local durable enqueue, restart and receip
   );
   test.setTimeout(60_000);
   const root = resolve(process.env.UD_REAL_LOCAL_ROOT!);
+  const localPort = Number(process.env.UD_TEST_LOCAL_PORT ?? 4100);
+  const localOrigin = `http://127.0.0.1:${localPort}`;
   const db = resolve(root, ".frontend-smoke", `${randomUUID()}.db`);
   let service: ChildProcess | undefined;
   async function start() {
@@ -27,8 +30,8 @@ test("real B service: browser pairing, local durable enqueue, restart and receip
       env: {
         ...process.env,
         UD_DEVICE_DB: db,
-        UD_LOCAL_PORT: "4100",
-        UD_ALLOWED_ORIGINS: "http://127.0.0.1:5173",
+        UD_LOCAL_PORT: String(localPort),
+        UD_ALLOWED_ORIGINS: baseURL!,
         UD_COORDINATOR_URL: "",
         UD_DEVICE_TOKEN_FILE: "",
         UD_REVIEWER_TOKEN_FILE: "",
@@ -40,7 +43,7 @@ test("real B service: browser pairing, local durable enqueue, restart and receip
           if (service?.exitCode !== null) return "process exited";
           try {
             return (
-              await fetch("http://127.0.0.1:4100/local/session", {
+              await fetch(localOrigin + "/local/session", {
                 headers: { "X-UD-Contract": "UD-IC/1.0" },
               })
             ).status;

@@ -114,6 +114,7 @@ export class ApiClient {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        "X-UD-Contract": "UD-IC/1.0",
         ...(options?.headers || {}),
       },
     });
@@ -238,7 +239,9 @@ export class ApiClient {
 
   // Sync & Offline
   public static async getSyncStatus(): Promise<SyncStatus> {
-    return this.request<SyncStatus>("/api/sync/status");
+    const health = await this.request<{deviceId:string;coordinatorReachable:boolean;pendingCount:number}>("/local/health");
+    const conflicts = await this.getConflicts(false);
+    return { enabled: true, deviceId: health.deviceId, isOnline: health.coordinatorReachable, pendingOutboxCount: health.pendingCount, unresolvedConflictsCount: conflicts.length };
   }
 
   public static async toggleOnline(online: boolean): Promise<{ status: string; isOnline: boolean }> {
@@ -249,7 +252,8 @@ export class ApiClient {
   }
 
   public static async getOutbox(): Promise<OutboxItem[]> {
-    return this.request<OutboxItem[]>("/api/sync/outbox");
+    const state = await this.request<{pending:{eventId:string;queuedAt:string;state:string;attempts:number}[]}>("/local/state");
+    return state.pending.map(item => ({id:item.eventId,eventId:item.eventId,destination:"coordinator",status:item.state,retryCount:item.attempts,createdAt:item.queuedAt}));
   }
 
   public static async flushOutbox() {
@@ -257,7 +261,8 @@ export class ApiClient {
   }
 
   public static async getConflicts(resolved: boolean = false): Promise<ConflictRecord[]> {
-    return this.request<ConflictRecord[]>(`/api/sync/conflicts?resolved=${resolved}`);
+    const page = await this.request<{items:{id:string;taskId:string;currentRevision:number;baseRevision:number;detectedAt:string;status:string;resolution?:string}[]}>(`/api/sync/conflicts?status=${resolved ? "resolved" : "open"}`);
+    return page.items.map(item => ({id:item.id,taskId:item.taskId,localRevision:item.currentRevision,incomingRevision:item.baseRevision,detectedAt:item.detectedAt,resolved:item.status==="resolved",resolution:item.resolution}));
   }
 
   public static async resolveConflict(conflictId: string, resolution: "accepted_incoming" | "kept_local") {

@@ -99,22 +99,25 @@ export function App() {
   useEffect(() => {
     refreshAll();
 
-    const eventSource = new EventSource("/api/events/stream");
+    const eventSource = new EventSource("/api/events/stream?contractVersion=UD-IC%2F1.0");
 
     eventSource.onopen = () => {
       setSseConnected(true);
     };
 
-    eventSource.onmessage = (e) => {
+    const receive = (e: MessageEvent) => {
       try {
         const parsed = JSON.parse(e.data);
         if (parsed.type === "connected") return;
-        setEvents((prev) => [parsed as ActivityEvent, ...prev.slice(0, 49)]);
+        setEvents((prev) => [parsed as ActivityEvent, ...prev.filter(event => event.id !== parsed.id).slice(0, 49)]);
         refreshAll();
       } catch (err) {
         console.error("SSE JSON parse error:", err);
       }
     };
+
+    eventSource.addEventListener("activity", receive);
+    eventSource.onmessage = receive;
 
     eventSource.onerror = () => {
       setSseConnected(false);
@@ -263,6 +266,11 @@ export function App() {
 
   return (
     <div>
+      <div role="status" style={{ padding: "12px 20px", background: "#142b22", color: "#ecf4eb" }}>
+        Read-only rollback view: live tasks, agents and activity. Pair in the official dashboard first.
+        Use the official dashboard for queued commands, conflicts, reviews and verified application.
+      </div>
+      <fieldset disabled style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
       {/* Top Navbar */}
       <Header
         syncStatus={syncStatus}
@@ -274,6 +282,7 @@ export function App() {
         isDemoRunning={isDemoRunning}
       />
 
+      </fieldset>
       {/* Tabs */}
       <nav className="tab-navigation">
         <button
@@ -299,7 +308,7 @@ export function App() {
 
         <button
           className={`tab-btn ${activeTab === "comms" ? "active" : ""}`}
-          onClick={() => setActiveTab("comms")}
+          disabled title="Use the official application; this legacy extension is not available through the local proxy" onClick={() => setActiveTab("comms")}
         >
           <IconMessageSquare className="w-4 h-4" /> Handoffs & Comms ({handoffs.length})
         </button>
@@ -313,20 +322,21 @@ export function App() {
 
         <button
           className={`tab-btn ${activeTab === "project" ? "active" : ""}`}
-          onClick={() => setActiveTab("project")}
+          disabled title="Use the official application; this legacy extension is not available through the local proxy" onClick={() => setActiveTab("project")}
         >
           <IconFolder className="w-4 h-4" /> Project & Contracts
         </button>
 
         <button
           className={`tab-btn ${activeTab === "settings" ? "active" : ""}`}
-          onClick={() => setActiveTab("settings")}
+          disabled title="Use the official application; this legacy extension is not available through the local proxy" onClick={() => setActiveTab("settings")}
         >
           <IconSettings className="w-4 h-4" /> Settings & Replacement
         </button>
       </nav>
 
       {/* Main Content Area */}
+      <fieldset disabled style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
       <main className="main-container">
         {activeTab === "command" && (
           <CommandCenter
@@ -392,6 +402,7 @@ export function App() {
           />
         )}
       </main>
+      </fieldset>
 
       {/* Review Modal */}
       {activeReviewPatch && (

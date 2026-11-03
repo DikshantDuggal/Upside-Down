@@ -7,10 +7,15 @@
  * - UPSIDE-DOWN: ROLLBACK_FRONTEND
  */
 
+import path from "node:path";
+import fs from "node:fs";
 import { FrontendController } from "../server/core/frontendController.ts";
 
-const controller = new FrontendController();
 const args = process.argv.slice(2);
+const stateIndex = args.indexOf("--state-dir");
+const state = stateIndex >= 0 ? args[stateIndex + 1] : process.env.UD_STATE_DIR ?? path.join(process.env.LOCALAPPDATA ?? process.env.XDG_STATE_HOME ?? process.cwd(), "UpsideDown", "final-mvp");
+if (!state) throw new Error("--state-dir requires a path");
+const controller = new FrontendController(process.cwd(), path.resolve(state, "frontend.runtime.json"));
 const command = args[0] ? args[0].toLowerCase() : "status";
 
 console.log("=================================================");
@@ -23,7 +28,7 @@ if (command === "status" || command === "frontend_status" || command === "upside
   console.log(`Version:                 ${status.activeFrontendVersion}`);
   console.log(`Source Directory:        ${status.sourceDir}`);
   console.log(`Serving Directory:       ${status.resolvedPublicDir}`);
-  console.log(`Distribution Bundle:     ${status.bundleExists ? "READY (app.js found)" : "MISSING (Needs build)"}`);
+  console.log(`Distribution Bundle:     ${status.bundleExists ? "READY (built entrypoint found)" : "MISSING (Needs build)"}`);
   console.log(`HTML Entrypoint:         ${status.htmlExists ? "READY (index.html found)" : "MISSING"}`);
   console.log(`Rollback Available:      ${status.rollbackAvailable ? "YES" : "NO"}`);
   if (status.previousFrontend) {
@@ -34,12 +39,14 @@ if (command === "status" || command === "frontend_status" || command === "upside
     console.log(`Last Activation Result:  ${status.lastActivationResult}`);
   }
   console.log(`Available Frontends:     ${status.availableFrontends.join(", ")}`);
-  console.log("\nApplication Access URL:  http://localhost:4000/\n");
+  const controlPath = path.resolve(state, "launch-control.json");
+  const webUrl = fs.existsSync(controlPath) ? JSON.parse(fs.readFileSync(controlPath, "utf8")).urls?.web : undefined;
+  console.log(`\nApplication Access URL:  ${webUrl ?? "Start the managed launcher to obtain the configured URL"}\n`);
   process.exit(0);
 }
 
 if (command === "activate" || command === "activate_team_frontend" || command === "upside-down:activate_team_frontend") {
-  const candidatePath = args[1] || undefined;
+  const candidatePath = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
   console.log(`\nValidating and activating Team Frontend${candidatePath ? ` from ${candidatePath}` : " from standard directory"}...`);
   
   const result = controller.activateTeamFrontend(candidatePath);

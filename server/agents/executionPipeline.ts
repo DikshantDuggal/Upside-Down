@@ -6,15 +6,17 @@
 import { randomUUID } from "node:crypto";
 import { ProjectFileWatcher } from "../workers/fileWatcher.ts";
 import { TestRunner, type TestRunResult } from "../workers/testRunner.ts";
-import { RepairEngine } from "./repairEngine.ts";
+import { RepairEngine, type RepairProvider } from "./repairEngine.ts";
 import { PatchReviewEngine } from "./reviewEngine.ts";
-import type { CoordinatorService } from "../core/coordinator.ts";
+import { ConflictError, type CoordinatorService } from "../core/coordinator.ts";
 import type { AgentRunResult, ReviewVerdict } from "../../contracts/agent.ts";
 
 export interface PipelineConfig {
   workspacePath: string;
   testCommand: string;
   autoWatch?: boolean;
+  /** Trusted server-side dependency injection, not an HTTP command field. */
+  repairProvider?: RepairProvider;
 }
 
 export class ExecutionPipeline {
@@ -31,7 +33,7 @@ export class ExecutionPipeline {
     this.coordinator = coordinator;
 
     this.testRunner = new TestRunner(30000);
-    this.repairEngine = new RepairEngine({ maxAttempts: 3, timeoutMs: 15000 });
+    this.repairEngine = new RepairEngine({ maxAttempts: 3, timeoutMs: 15000 }, config.repairProvider);
     this.reviewEngine = new PatchReviewEngine();
 
     this.watcher = new ProjectFileWatcher({
@@ -104,6 +106,7 @@ export class ExecutionPipeline {
     // 2. Tests failed -> Record test_failed event
     const failureSummary = testResult.failureSummary || "Test suite failed";
     let taskId: string = randomUUID();
+    let ownedRevision: number | undefined;
 
     if (this.coordinator) {
       const task = this.coordinator.createTask(
@@ -116,11 +119,11 @@ export class ExecutionPipeline {
       );
       taskId = task.id;
 
-      this.coordinator.transitionTask(
+      ownedRevision = this.coordinator.transitionTask(
         taskId,
         { targetStatus: "running", baseRevision: task.revision, reason: "Repair pipeline triggered" },
         "agent_engine"
-      );
+      ).revision;
 
       this.coordinator.recordExternalEvent({
         id: randomUUID(),
@@ -148,9 +151,9 @@ export class ExecutionPipeline {
     if (repairResult.status !== "completed" || !repairResult.diffContent) {
       if (this.coordinator) {
         const task = this.coordinator.getTask(taskId);
-        this.coordinator.transitionTask(
+        if (task.revision === ownedRevision && task.status === "running") this.coordinator.transitionTask(
           taskId,
-          { targetStatus: "failed", baseRevision: task.revision, reason: repairResult.error || "Repair failed" },
+          { targetStatus: repairResult.status === "blocked" ? "blocked" : "failed", baseRevision: task.revision, reason: repairResult.error || "Repair failed" },
           "agent_engine"
         );
       }
@@ -159,15 +162,31 @@ export class ExecutionPipeline {
 
     // 4. Review Engine inspects proposed patch
     const verdict: ReviewVerdict = this.reviewEngine.reviewPatch(repairResult.diffContent);
+    if (!verdict.safe) {
+      this.coordinator?.recordExternalEvent({ id: randomUUID(), taskId, source: "agent_engine", type: "patch_reviewed",
+        timestamp: new Date().toISOString(), payload: { ...verdict } });
+      if (this.coordinator) {
+        const task = this.coordinator.getTask(taskId);
+        if (task.revision === ownedRevision && task.status === "running") {
+          this.coordinator.transitionTask(taskId, { baseRevision: task.revision, targetStatus: "blocked", reason: "Patch review blocked candidate" }, "agent_engine");
+        }
+      }
+      return { ...repairResult, status: "blocked", diffContent: undefined, error: "Patch review blocked candidate" };
+    }
 
     // 5. Propose patch to Coordinator for human approval
     if (this.coordinator) {
-      this.coordinator.proposePatch(
+      try { this.coordinator.proposePatch(
         taskId,
         runId,
         repairResult.diffContent,
-        repairResult.verificationOutput
-      );
+        repairResult.verificationOutput,
+        undefined,
+        ownedRevision
+      ); } catch (error) {
+        if (!(error instanceof ConflictError)) throw error;
+        return { ...repairResult, status: "blocked", error: "Repair run no longer owns this task revision" };
+      }
 
       this.coordinator.recordExternalEvent({
         id: randomUUID(),

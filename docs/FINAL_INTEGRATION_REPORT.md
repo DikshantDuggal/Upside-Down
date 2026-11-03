@@ -1,202 +1,106 @@
-# UPSIDE-DOWN: FINAL MULTI-COMPUTER INTEGRATION & MVP REPORT
-**Baseline Contract:** `UD-IC/1.0`  
-**Integration Branch:** `integration/final-mvp`  
-**Date:** 2026-11-04  
-**Author / Integration Lead:** `[DikshantDuggal's Antigravity]`  
-**Overall Status:** **FINAL MVP READY — GO FOR LIVE DEMONSTRATION** 🚀
+# UPSIDE-DOWN — FINAL MVP REPORT
 
----
+Date: 4 November 2026 (Asia/Kolkata).
 
-## 1. Executive Summary
+## Source and working tree
 
-Upside-Down is an offline-first, multi-agent AI coding collaboration platform engineered for high-concurrency developer coordination across distributed physical nodes.
+Local release branch: `codex/final-launch`, in the isolated `final-mvp` worktree.
+Source baseline: `integration/final-mvp` at `775942e`; original local checkout
+was at `66aa6ce` with pre-existing modifications and was preserved.
+Canonical A/B/frontend source: merged main `892e65d`, including A `437383c`,
+B `55307ad`, frontend `742bba2` and owner website fixes `05696bc`.
+Exact final local SHA/tree is recorded in `.board/evidence/final-release.json`
+and can be checked with `git log -3 --oneline`. No remote push/main merge occurs.
 
-This report confirms the **complete end-to-end integration** of:
-1. **Computer A (Authoritative Coordinator & Execution Host):** Owned by Dikshant Duggal (Role 1 & 2), hosting the authoritative SQLite state, monotonic sequence validator, epoch-scoped canonical journal, bounded heuristic repair engine, security review engine, and verified patch application pipeline.
-2. **Computer B (Offline Synchronization Engine):** Owned by Arhaan Arora (Role 4 / PR #6 / `5-backend-b-sync`), featuring an immutable SQLite WAL outbox, browser idempotency cache, full-jitter retry worker, and monotonic sequence allocation.
-3. **Official Team Frontend & Demo Cockpit:** Owned by Guragam Singh (Role 3 / PR #8 / `4-frontend-dashboard` / `web/`), featuring an accessible, high-performance React 19 / Vite / Tailwind developer dashboard, supplemented by a disposable demo cockpit in `apps/demo-frontend/` controlled via `scripts/frontend-manager.js`.
+The human explicitly approved the narrow project/handoff UI/proxy exception.
+Board records: #6617052077, endpoint scope #6616311809/#6616364660.
+All other frontend/B fixes were imported unchanged before those narrow additions.
 
-### Key Integration Highlights
-- **100% Contract Compliance:** All inter-service communications strictly adhere to canonical specification `UD-IC/1.0`.
-- **Zero Data Loss under Partition:** Commands enqueued while offline are durably committed in SQLite WAL on Computer B, survive process kill/restarts, and automatically flush upon network reconnection with idempotent deduplication on Computer A.
-- **Strict Concurrency Protection:** Stale task mutations do not silently overwrite authoritative state; they are safely quarantined into `conflicts_v1` as open conflict records awaiting authorized reviewer resolution.
-- **Two-Phase Verified Patch Application:** Human reviewer approval leaves proposed patches in `review`; code changes are only committed to the repository after explicit diff traversal checks, base commit matching, and test suite verification.
-- **Multi-Frontend Agility:** The application can switch seamlessly between the official team dashboard and the demo cockpit with zero backend downtime or data loss (`scripts/frontend-manager.js`).
+## Actual application architecture
 
----
+`web/` official React/Vite build -> same-origin host -> authenticated B local
+service -> canonical B sync router/A transactional gateway -> one authoritative
+SQLite and canonical journal. Each peer has a separate local DB/identity/outbox.
+Execution uses registered argv profiles and disposable Git worktrees; application
+requires separate reviewer authority, safe immutable metadata, passing real tests
+and a verified commit on the dedicated integration worktree.
 
-## 2. Architecture & Service Topology
+The root launch command validates prerequisites, builds the actual official app,
+checks state/ports, enrolls only its local device, verifies protected service health
+and launches the components. Graceful stop uses protected local lifecycle control.
+Existing unrelated port owners are preserved. The home launcher now uses
+A4001/local4110/UI5175 alongside the original checkout's 4000/4100/5173 stack.
 
-```
-+----------------------------------------------------------------------------------------------------+
-|                                      PHYSICAL COMPUTER A                                           |
-|                                (Dikshant Duggal - Laptop 1)                                        |
-|                                                                                                    |
-|   +--------------------------------------------------------------------------------------------+   |
-|   |                  Authoritative Coordinator & Execution Pipeline (Port 4000)                |   |
-|   |                                                                                            |   |
-|   |   +-------------------+  +-------------------+  +-------------------+  +---------------+   |   |
-|   |   | Monotonic Sequence|  | Canonical Event   |  | Conflict Registry |  | Verified Patch|   |   |
-|   |   | Validation & Gap  |  | Epoch Journal     |  | Quarantine        |  | Application   |   |   |
-|   |   | (SEQUENCE_GAP)    |  | (/api/sync/pull)  |  | (/api/sync/conf.) |  | (/patches/..) |   |   |
-|   |   +-------------------+  +-------------------+  +-------------------+  +---------------+   |   |
-|   |                                     |                                                      |   |
-|   |   +---------------------------------+--------------------------------------------------+   |   |
-|   |   |               Durable Coordinator Database (SQLite WAL mode)                       |   |   |
-|   |   +------------------------------------------------------------------------------------+   |   |
-|   +--------------------------------------------------------------------------------------------+   |
-|                                                ^                                                   |
-|                        LAN / HTTP Requests     | (UD-IC/1.0: /api/sync/push, /pull, /stream)       |
-|                        Port: 4000              |                                                   |
-+------------------------------------------------+---------------------------------------------------+
-                                                 |
-+------------------------------------------------+---------------------------------------------------+
-|                                      PHYSICAL COMPUTER B                                           |
-|                                  (Arhaan Arora - Laptop 2)                                         |
-|                                                                                                    |
-|   +--------------------------------------------------------------------------------------------+   |
-|   |                      Client-Local Offline Synchronization Service (Port 4100)              |   |
-|   |                                                                                            |   |
-|   |   +-------------------+  +-------------------+  +-------------------+  +---------------+   |   |
-|   |   | Local Outbox      |  | Local Ingestion   |  | Local Change Log  |  | Reverse Proxy |   |   |
-|   |   | (SQLite WAL)      |  | & Cache Hydration |  | & SSE Stream      |  | Allowlist     |   |   |
-|   |   +-------------------+  +-------------------+  +-------------------+  +---------------+   |   |
-|   |             ^                                                                      ^           |
-|   +-------------|----------------------------------------------------------------------|-----------+
-|                 | (Pairing: /local/session, Commands: /local/commands, Proxy: /api/*)  |           |
-|                 +----------------------------------------------------------------------+           |
-|                                                ^                                                   |
-|   +--------------------------------------------|-----------------------------------------------+   |
-|   |                       Official Team Frontend Dashboard (Port 5173)                         |   |
-|   |                                (Guragam Singh - React 19 / Vite)                           |   |
-|   |                                                                                            |   |
-|   |   * Real-time Task Board           * Agent Activity Stream         * Conflict Resolution   |   |
-|   |   * Network Connectivity Status    * Patch Review & Approval       * Local Session Pairing |   |
-|   +--------------------------------------------------------------------------------------------+   |
-+----------------------------------------------------------------------------------------------------+
-```
+## Feature-to-endpoint compatibility
 
----
+| Official UI feature | Actual route/path | Result |
+| --- | --- | --- |
+| Pair/restore session | GET/POST `/local/session` | PASS, cookie/CSRF |
+| Reviewer permissions | GET `/local/authorization`, separate A credential | PASS, revocation fails closed |
+| Tasks/proposals | `/local/commands`, B push/pull, A task API | PASS, durable outbox and revisions |
+| Projects | GET/POST `/api/projects`, bounded online B proxy | PASS, actual browser create/reload |
+| Device agent registration | POST `/api/agents/register` | PASS, device ownership, no fabricated runtime |
+| Task assignments | canonical ownerId on task commands | PASS, two distinct device-owned agent IDs |
+| Structured handoff | GET/POST `/api/handoffs` | PASS, task/dependency/project context |
+| Recipient ACK | existing handoff payload acknowledgement convention | PASS, receiver ownership and duplicate suppression |
+| Team messages | canonical message.send, full payload hydration | PASS, real delivery and live update |
+| Activity | local/remote SSE + canonical pull | PASS, replay/duplicate handling |
+| Conflicts | canonical list/guarded resolve | PASS, actual reviewer UI resolution |
+| Runs/checkpoints | A run/cancel/read/checkpoint APIs | PASS, bounded real tests and metadata-only checkpoints |
+| Approval/application | separate decision/apply/application endpoints | PASS, real Git commit/evidence; approval alone changes no source |
+| Frontend replacement | CLI + dynamic web host | PASS, actual browser official/demo/official with same data |
 
-## 3. Four-Person Ownership & Integration Matrix
+Projects/handoffs remain online-only extensions; they are not secretly added to
+the canonical offline Command union. Cached views disclose stale state and disable
+writes; native sync success revalidates them after reconnect. Task records remain
+global workspace items; project context on a handoff is not an invented task field.
 
-| Role & Owner | Component | Location | Implementation Status | Integration Verification |
-| :--- | :--- | :--- | :--- | :--- |
-| **Role 1**<br>Dikshant Duggal | Core Backend & Coordinator | `server/core/`<br>`server/db/`<br>`server/api/` | ✅ Complete | Monotonic sequence validation, epoch-scoped canonical journal, conflict quarantine (`conflicts_v1`), SSE replay with `Last-Event-ID`. |
-| **Role 2**<br>Dikshant Duggal | AI Agent Execution Engine | `server/agents/` | ✅ Complete | Debounced file watcher, subprocess test runner, heuristic repair engine, AST patch safety reviewer, automated execution pipeline. |
-| **Role 3**<br>Guragam Singh | Official Web Dashboard | `web/`<br>`apps/demo-frontend/` | ✅ Complete | React 19, Lucide icons, Vite, full browser pairing with CSRF protection, optimistic task submission, accessibility audited (`@axe-core`). |
-| **Role 4**<br>Arhaan Arora | Offline Sync & Communication | `client-local/`<br>`server/sync/`<br>`contracts/sync.ts` | ✅ Complete | Native SQLite WAL outbox, ordered command batches, retry with full jitter, upstream contract validation, local SSE cursor stream. |
+## Verification performed
 
----
+See `LAUNCH_ACCEPTANCE_REPORT.md` for exact commands/counts and evidence files.
+Clean root and web dependency installs passed. Root lockfile is portable and
+contains no local machine/junction dependencies. Root/B types, contract/regression,
+B service/router, frontend build/unit, launcher/rollback and actual browser tests pass.
+Fixture UI tests are distinguished from real A/B/Git browser checks.
 
-## 4. Verification & Test Evidence Matrix
+A reproduced named-pipe acknowledgement bug was fixed and retested with actual
+stop/restart. A real redirected Windows profile EXDEV on replacing selection
+metadata was fixed and verified by restarting the user's home launcher.
+A stale project view after brief coordinator loss was caught by the new real
+two-device browser test and fixed with bounded revalidation driven by native sync.
 
-All test suites were executed against real Node.js v24 runtimes and compiled SQLite databases. Zero tests are mocked or simulated.
+## Current launch and onboarding
 
-### Summary of Passing Test Suites
+From `PS C:\Users\diksh>`: `.\Start-UpsideDown.ps1`.
+Official verified release URL: `http://127.0.0.1:5175`.
+Stop: `.\Start-UpsideDown.ps1 -Stop`.
+[Complete launch guide](FINAL_LAUNCH_GUIDE.md),
+[walkthrough](HACKATHON_DEMO_GUIDE.md),
+[Computer B commands](TWO_COMPUTER_SETUP.md).
 
-| Test Suite File | Domain / Focus | Tests Run | Result | Evidence Highlights |
-| :--- | :--- | :---: | :---: | :--- |
-| `server/tests/environment.test.ts` | Toolchain & Isolation | 5 / 5 | **PASS** ✅ | Git v2.55, Node v24.20, npm v11.19, GitHub CLI authenticated (`@DikshantDuggal`), branch verified. |
-| `server/tests/coordinator.test.ts` | Role 1 Coordinator Core | 6 / 6 | **PASS** ✅ | Process restarts, state transitions, revision conflict rejection, REST APIs, SSE broadcast, patch approval. |
-| `server/tests/agentEngine.test.ts` | Role 2 Execution Engine | 5 / 5 | **PASS** ✅ | File change debouncing, subprocess timeout guard, bounded patch generation, AST security checks, E2E pipeline. |
-| `server/tests/syncOffline.test.ts` | Role 4 Durable Outbox | 5 / 5 | **PASS** ✅ | Outbox disk persistence, reconnection auto-flush, duplicate suppression, conflict quarantine, mention parsing. |
-| `server/tests/dashboardE2E.test.ts` | UI & Integration Flow | 3 / 3 | **PASS** ✅ | Static asset delivery, health/agent endpoint wiring, full failure-to-patch autonomous workflow. |
-| `server/tests/multiAgentDemo.test.ts` | Phase 3 Multi-Agent Demo | 8 / 8 | **PASS** ✅ | Independent agent environments, structured handoffs, revision increments, durable event audit stream. |
-| `server/tests/frontendReplacement.test.ts` | Frontend Handoff & Rollback | 8 / 8 | **PASS** ✅ | Entrypoint validation, candidate activation, backend state preservation across switch, instant rollback. |
-| `server/tests/backendAUdic.test.ts` | Computer A UD-IC/1.0 Core | 10 / 10 | **PASS** ✅ | Atomic inbox deduplication, `SEQUENCE_GAP` handling, conflict quarantine, canonical pull with 410, verified patch application. |
-| `server/tests/multiComputerIntegration.test.ts` | Multi-Computer E2E Loop | 8 / 8 | **PASS** ✅ | Computer A <-> Computer B live HTTP replication, offline outbox queuing, auto-recovery, conflict resolution. |
-| **Root Test Suite Total** | **All Server & Integration** | **58 / 58** | **PASS** ✅ | **100% Pass Rate across all 9 suites** |
-| `client-local/tests/*.test.ts` | Backend B Offline Service | 17 / 17 | **PASS** ✅ | Process restart durability, CSRF guards, sender leases, isolated database sequences, SSE watermark replay. |
-| `server/sync/tests/*.test.ts` | Sync Router Middleware | 4 / 4 | **PASS** ✅ | Batch validation, partial failure retry slicing, sequence gap bounds, ErrorV1 formatting. |
-| `web/tests/*.test.{ts,tsx}` | Official Web Dashboard | 35 / 35 | **PASS** ✅ | Vitest + React Testing Library + Axe-core a11y, keyboard navigation, network stale indicators, pairing handshake. |
-| **Grand Total Across System** | **All 4 Roles Integrated** | **114 / 114** | **PASS** ✅ | **Zero Failures Across Entire Platform** |
+The user later supplied remote `http://192.168.137.242:4001`; unauthenticated
+health returned401. Arhaan confirmed fresh device enrollment for
+`e14609f1-282f-4795-b347-8f401797d976` (principal
+`8f1fb55e-913e-4e0e-8233-228c071f3986`). The newly issued token still needs trusted
+file transfer from his protected file to this laptop. Authentication/sync over
+that physical link is BLOCKED until transfer; reachability is not delivery proof.
+No old local credential was sent following an automatic approval rejection.
 
----
+## Readiness and limits
 
-## 5. Physical vs. Loopback Testing Verification
+- LOCAL HACKATHON DEMO: GO for the verified canonical and narrow collaboration scope.
+- TWO INDEPENDENT LOCAL DEVICES: PASS with actual A/B databases, HTTP and browser sessions.
+- PHYSICAL TWO-COMPUTER DEMO: NOT TESTED; newly requested LAN authentication is pending token transfer.
+- PUBLIC PRODUCTION: NOT AUTHORIZED / NOT ASSESSED.
 
-### Automated Two-Instance Loopback Verification (Conducted & Verified)
-- Computer A (`server/index.ts`) was instantiated on a dynamic loopback port (`127.0.0.1:54745`).
-- Computer B (`client-local/src/server.ts`) was instantiated on an independent loopback port (`127.0.0.1:54746`) with its own disk-isolated SQLite database.
-- Real HTTP/1.1 traffic passed between the two processes.
-- Process crashes and network partitions were simulated by abruptly closing the Computer A server socket, queuing commands on Computer B, re-opening Computer A, and asserting automatic convergence.
+The new home LAN wrapper is `C:\Users\diksh\Start-UpsideDown-LAN.ps1` and uses
+fresh device state, local4111/UI5176. It refuses to reuse the old local token.
+The recurring GitHub monitor remains disabled. No new scheduled agents or shell
+polling loops are created. No live DB reset, source overwrite, force-push,
+branch deletion, remote merge or public deployment occurs.
 
-### Physical Two-Computer LAN Runbook (Prepared for Demo)
-To execute across two distinct physical laptops:
-1. **Network Configuration:** Both laptops connect to the same Wi-Fi / Local Area Network (or direct Ethernet).
-2. **Computer A IP Discovery:** Computer A discovers its LAN IP address (e.g. `192.168.1.150`).
-3. **Firewall Rule:** Allow inbound TCP traffic on port 4000 on Computer A:
-   ```powershell
-   New-NetFirewallRule -DisplayName "Upside-Down Coordinator" -Direction Inbound -LocalPort 4000 -Protocol TCP -Action Allow
-   ```
-4. **Computer B Connection:** Computer B launches targeting Computer A's LAN IP:
-   ```powershell
-   .\scripts\start-client-local.ps1 -CoordinatorUrl "http://192.168.1.150:4000"
-   ```
-5. **Frontend Connection:** The browser opens `http://localhost:5173/` on Computer B (or Computer A), completes pairing, and accesses the synchronized workspace.
-
----
-
-## 6. Startup Runbook & Demonstration Guide
-
-### Quickstart Scripts
-
-#### Step 1: Start Authoritative Coordinator (Computer A)
-```powershell
-# In project root:
-.\scripts\start-coordinator.ps1
-```
-- Listens on `0.0.0.0:4000`.
-- Outputs active LAN IP addresses for peer connection.
-- Serves the active dashboard at `http://localhost:4000/`.
-
-#### Step 2: Start Offline Client Service (Computer B)
-```powershell
-# On Computer B:
-.\scripts\start-client-local.ps1 -CoordinatorUrl "http://<COMPUTER_A_IP>:4000"
-```
-- Listens on `127.0.0.1:4100`.
-- Initializes local SQLite WAL outbox at `client-local/data/device-b.db`.
-- Creates local session pairing secret at `device-b.db.session.json`.
-
-#### Step 3: Start Official Team Dashboard (Computer B or A)
-```powershell
-# In web directory:
-.\scripts\start-frontend.ps1
-```
-- Listens on `http://localhost:5173/`.
-- Proxies `/local` and `/api` to `http://127.0.0.1:4100`.
-
----
-
-## 7. Live Demonstration Walkthrough Script
-
-| Step | Action | Expected Observable Behavior | System Mechanism |
-| :---: | :--- | :--- | :--- |
-| **1** | Open Dashboard on Computer B | Browser loads dashboard; prompts for local pairing key. | CSRF / Session pairing via `/local/session`. |
-| **2** | Enter Pairing Key | Dashboard pairs; shows green "Online" badge with Computer A coordinator. | Capabilities handshake confirms contract `UD-IC/1.0`. |
-| **3** | Create New Task on Computer B | Task immediately appears in local dashboard in `pending` status. | Enqueued to SQLite WAL outbox with monotonic sequence 1; pushed to A and ACKed. |
-| **4** | Simulate Network Disconnect | Disconnect Computer B from Wi-Fi (or stop coordinator). | Dashboard status turns amber ("Offline / Stale"); outbox queue count increments. |
-| **5** | Enqueue Task Transition Offline | Change task status to `running` while completely offline. | Command enqueued into SQLite WAL outbox with sequence 2. No network error thrown. |
-| **6** | Reconnect Network | Reconnect Wi-Fi (or restart coordinator). | Status turns green; worker auto-flushes outbox. Task on Computer A updates to `running` (Rev: 2). |
-| **7** | Trigger Concurrency Conflict | Computer A agent stages task for `review` (Rev: 3). Computer B attempts concurrent edit based on Rev: 2. | Conflict quarantined in `conflicts_v1` without silent overwrite. Alert appears on UI. |
-| **8** | Reviewer Conflict Resolution | Lead engineer resolves conflict via Reviewer UI (`keep_authoritative`). | Conflict resolved, journal records resolution, both nodes converge. |
-| **9** | Patch Verification & Apply | Agent proposes patch; reviewer inspects unified diff and clicks "Apply Patch". | Checksum verified, test profile executed, patch applied, task moved to `done` (Rev: 4). |
-
----
-
-## 8. Final MVP Verdict
-
-| Criterion | Requirement | Actual Status | Verdict |
-| :--- | :--- | :--- | :---: |
-| **Core Authoritative Backend** | Coordinator, SQLite WAL, Monotonic Sequence, Journal | 100% Implemented & Passing | **MET** |
-| **Offline Synchronization** | Local Outbox, Sequence Gap Recovery, Retry Backoff | 100% Implemented & Passing | **MET** |
-| **Conflict Management** | Stale Revision Quarantine, ConflictRecordV1, Reviewer API | 100% Implemented & Passing | **MET** |
-| **AI Execution Engine** | File Watcher, Test Runner, Heuristic Repair, Ast Review | 100% Implemented & Passing | **MET** |
-| **Two Frontend Implementations**| Official React 19 Dashboard + Disposable Demo Cockpit | Both Functional & Switchable | **MET** |
-| **Multi-Service Verification** | Computer A <-> Computer B bi-directional replication | 8/8 Tests Passing | **MET** |
-| **Overall Quality Gate** | 114/114 passing tests, 0 TypeScript errors | Flawless Test Record | **MET** |
-
-### **FINAL VERDICT: GO FOR LAUNCH** 🚀
-The Upside-Down platform is fully integrated, stable, and ready for physical multi-computer hackathon demonstration under the `UD-IC/1.0` contract baseline.
+Actual independent AI implementation, real LLM/cloud-state recovery, automatic
+leader failover and watcher-triggered durable execution remain outside the verified
+scope. Worktrees isolate edits rather than providing a hostile-code OS sandbox.
+HTTP is a trusted private demo-LAN assumption. Demo resets create a fresh marked
+state and retain previous records/checkpoints. Rollback is documented and tested.

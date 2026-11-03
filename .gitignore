@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 
 # Build outputs
 dist/
@@ -16,3 +15,11 @@ build/
 .board/
 .DS_Store
 Thumbs.db
+
+# Local runtime artifacts and private pairing/enrollment files
+/data/
+.frontend-smoke/
+*.db-wal
+*.db-shm
+*.token
+*.session.json

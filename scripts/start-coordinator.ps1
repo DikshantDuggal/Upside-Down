@@ -1,45 +1,16 @@
-<#
-.SYNOPSIS
-  Starts Computer A Authoritative Coordinator (Role 1 & 2)
-  Baseline: UD-IC/1.0
-  Port: 4000 (binds to 0.0.0.0 for LAN access)
-#>
-
-$ErrorActionPreference = "Stop"
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Resolve-Path "$ScriptDir\.."
-
-Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " UPSIDE-DOWN: STARTING AUTHORITATIVE COORDINATOR (COMP A) " -ForegroundColor Cyan
-Write-Host "==========================================================" -ForegroundColor Cyan
-
-# Environment configuration
-$env:PORT = "4000"
-$env:UD_HOST = "0.0.0.0"
-$env:UD_DB_PATH = "$ProjectRoot\data\upside_down.db"
-$env:UD_WORKSPACE_PATH = "$ProjectRoot"
-$env:UD_TEST_COMMAND = "npm test"
-
-# Ensure data directory exists
-if (-not (Test-Path "$ProjectRoot\data")) {
-    New-Item -ItemType Directory -Path "$ProjectRoot\data" | Out-Null
-}
-
-# Display LAN IP addresses for multi-computer pairing
-Write-Host "`nDetecting local IPv4 addresses for Computer B (Arhaan's client-local):" -ForegroundColor Yellow
-$ipAddresses = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
-    $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" 
-}
-foreach ($ip in $ipAddresses) {
-    Write-Host "  -> Coordinator LAN Target: http://$($ip.IPAddress):4000" -ForegroundColor Green
-}
-Write-Host "  -> Loopback Target:        http://127.0.0.1:4000" -ForegroundColor Green
-
-Write-Host "`nDashboard URLs:" -ForegroundColor Yellow
-Write-Host "  -> Live Cockpit (Demo):    http://localhost:4000/" -ForegroundColor White
-Write-Host "  -> Capabilities Endpoint:  http://localhost:4000/api/capabilities" -ForegroundColor White
-Write-Host "  -> SSE Event Stream:       http://localhost:4000/api/events/stream" -ForegroundColor White
-
-Write-Host "`nStarting server process on port 4000..." -ForegroundColor Cyan
-Set-Location $ProjectRoot
-npm start
+[CmdletBinding()]
+param([int]$Port = 4000, [string]$BindAddress = '127.0.0.1', [string]$DatabasePath)
+$ErrorActionPreference = 'Stop'
+$ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Install Node 24.20+ and reopen PowerShell.' }
+if (-not $DatabasePath) { $DatabasePath = Join-Path $env:LOCALAPPDATA 'UpsideDown\coordinator\coordinator.db' }
+$env:PORT = [string]$Port
+$env:UD_HOST = $BindAddress
+$env:UD_DB_PATH = [IO.Path]::GetFullPath($DatabasePath)
+$env:UD_ALLOW_LEGACY = '0'
+$env:UD_PATCH_COMPLETION_MODE = 'verified_application'
+Write-Host "Coordinator: http://${BindAddress}:$Port (authentication required)"
+Write-Host "For the full official UI + local sync service, run: npm run dev:all"
+Push-Location $ProjectRoot
+try { & node --experimental-strip-types server/index.ts; if ($LASTEXITCODE -ne 0) { throw 'Coordinator could not start; check the port and error above. Existing processes were left running.' } }
+finally { Pop-Location }
