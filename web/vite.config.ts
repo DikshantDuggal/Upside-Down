@@ -15,6 +15,8 @@ export default defineConfig({
               process.env.UD_DEVICE_DB ? `${process.env.UD_DEVICE_DB}.session.json` : "",
               path.resolve(__dirname, "../client-local/data/device-b.db.session.json"),
               path.resolve(__dirname, "../client-local/data/device.db.session.json"),
+              path.resolve(process.env.LOCALAPPDATA || "", "UpsideDown/computer-2/device.db.session.json"),
+              path.resolve(process.env.LOCALAPPDATA || "", "UpsideDown/device.db.session.json"),
             ].filter(Boolean);
             for (const file of candidates) {
               if (fs.existsSync(file)) {

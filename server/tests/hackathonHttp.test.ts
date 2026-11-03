@@ -10,6 +10,7 @@ import { createServer } from "../index.ts";
 
 describe("Upside-Down 2.0: Full HTTP API Endpoints Test", () => {
   let server: Server;
+  let instance: ReturnType<typeof createServer>;
   let baseUrl: string;
   let projectId: string;
   let selectedIdeaId: string;
@@ -17,7 +18,7 @@ describe("Upside-Down 2.0: Full HTTP API Endpoints Test", () => {
   let handoffId: string;
 
   before(async () => {
-    const instance = createServer(":memory:");
+    instance = createServer(":memory:");
     await new Promise<void>((resolve) => {
       server = instance.app.listen(0, "127.0.0.1", () => {
         const addr = server.address();
@@ -260,7 +261,7 @@ describe("Upside-Down 2.0: Full HTTP API Endpoints Test", () => {
     const body = (await res.json()) as any;
     assert.equal(body.success, true);
     assert.equal(body.release.collisionDetected, false);
-    assert.equal(body.release.buildStatus, "passed");
+    assert.equal(body.release.buildStatus, "pending");
   });
 
   it("POST /api/hackathon/projects/:id/release/approve records host release signature", async () => {
@@ -277,16 +278,15 @@ describe("Upside-Down 2.0: Full HTTP API Endpoints Test", () => {
     assert.equal(body.release.releaseApprovedBy, "Dikshant Duggal");
   });
 
-  it("POST /api/hackathon/projects/:id/deploy finalizes live production deployment", async () => {
+  it("POST /api/hackathon/projects/:id/deploy reports unconfigured deployment honestly", async () => {
     const res = await fetch(`${baseUrl}/hackathon/projects/${projectId}/deploy`, {
       method: "POST",
     });
 
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 501);
     const body = (await res.json()) as any;
-    assert.equal(body.success, true);
-    assert.equal(body.release.deploymentStatus, "live");
-    assert.ok(body.release.deploymentUrl);
+    assert.equal(body.success, false);
+    assert.equal(body.code, "DEPLOYMENT_NOT_CONFIGURED");
   });
 
   it("GET /api/hackathon/projects/:id aggregates complete project state", async () => {
@@ -297,6 +297,18 @@ describe("Upside-Down 2.0: Full HTTP API Endpoints Test", () => {
     assert.ok(body.selectedIdea);
     assert.ok(body.architecture);
     assert.equal(body.tasks.length, 4);
-    assert.equal(body.release.deploymentStatus, "live");
+    assert.equal(body.release.deploymentStatus, "not_started");
   });
+  it("mutations succeed with an active SSE subscriber and persist activity", async () => {
+    const abort = new AbortController();
+    const stream = await fetch(`${baseUrl}/hackathon/projects/${projectId}/events/stream`, {signal: abort.signal});
+    const reader = stream.body!.getReader();
+    try {
+      await reader.read();
+      const response = await fetch(`${baseUrl}/hackathon/projects/${projectId}/ideas/generate`, {method: "POST"});
+      assert.equal(response.status, 200);
+      assert.ok(instance.coordinator.listEvents().some(event => event.type === "IDEAS_GENERATED"));
+    } finally { abort.abort(); await reader.cancel().catch(() => {}); }
+  });
+
 });

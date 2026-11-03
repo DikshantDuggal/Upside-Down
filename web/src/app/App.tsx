@@ -19,6 +19,8 @@ import {
   ArrowRightLeft,
 } from "lucide-react";
 import { useDashboard } from "./useDashboard";
+import { useLocalSession } from "./useLocalSession";
+import { LocalSessionCard, PairBrowser } from "../features/LocalSession";
 import { errorMessage } from "../api/client";
 import {
   type Command,
@@ -160,6 +162,8 @@ const copy: Record<
 
 export function App() {
   const data = useDashboard();
+  const localSession = useLocalSession();
+  const [pairing, setPairing] = useState(false);
   const [page, setPage] = useState<Page>("overview");
   const [menuOpen, setMenuOpen] = useState(false);
   const [taskId, setTaskId] = useState<string | undefined>();
@@ -470,9 +474,11 @@ export function App() {
 
   const unavailable = !journal
     ? "The local service is unavailable. No command has been queued."
-    : storageError
-      ? "Browser retry records could not be saved. Resolve storage access before submitting."
-      : undefined;
+    : localSession.status !== "paired" && localSession.status !== "unsupported"
+      ? "Pair this browser with the local service before submitting a command."
+      : storageError
+        ? "Browser retry records could not be saved. Resolve storage access before submitting."
+        : undefined;
 
   const submit = useCallback(
     async (command: Command) => {
@@ -773,12 +779,18 @@ export function App() {
           )}
 
           {page === "network" && (
-            <Network
-              data={data}
-              intents={intents}
-              storageError={storageError}
-              retry={(intent) => void retry(intent)}
-            />
+            <>
+              <LocalSessionCard
+                session={localSession}
+                open={() => setPairing(true)}
+              />
+              <Network
+                data={data}
+                intents={intents}
+                storageError={storageError}
+                retry={(intent) => void retry(intent)}
+              />
+            </>
           )}
 
           <footer className="page-footer">
@@ -827,6 +839,9 @@ export function App() {
           data={data}
           close={() => setConflict(undefined)}
         />
+      )}
+      {pairing && (
+        <PairBrowser pair={localSession.pair} close={() => setPairing(false)} />
       )}
     </div>
   );

@@ -30,15 +30,8 @@ export class AICoordinator {
     this.geminiApiKey = config.geminiApiKey || process.env.GEMINI_API_KEY;
     this.openaiApiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
 
-    if (config.provider) {
-      this.provider = config.provider;
-    } else if (this.geminiApiKey) {
-      this.provider = "gemini";
-    } else if (this.openaiApiKey) {
-      this.provider = "openai";
-    } else {
-      this.provider = "demo";
-    }
+    // Current generator is deterministic; API-key presence cannot make it a live LLM.
+    this.provider = "demo";
   }
 
   public getProvider(): string {

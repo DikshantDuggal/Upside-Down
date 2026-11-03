@@ -276,7 +276,7 @@ describe("Upside-Down 2.0: AI Hackathon Mission Control Engine", () => {
     assert.ok(check2.collidingFiles.length > 0);
   });
 
-  it("11. Release Gatekeeper & Host Approval: Host approves release candidate and deploys", () => {
+  it("11. Release Gatekeeper & Host Approval: Host records local review without inventing deployment", () => {
     const tasks = repo.listTasks(createdProject.id);
     // Mark all tasks completed for clean release
     for (const t of tasks) {
@@ -285,18 +285,21 @@ describe("Upside-Down 2.0: AI Hackathon Mission Control Engine", () => {
     const completedTasks = repo.listTasks(createdProject.id);
 
     const evaluated = integrationEngine.evaluateRelease(createdProject.id, completedTasks);
-    assert.equal(evaluated.contractCheck, "passed");
+    assert.equal(evaluated.contractCheck, "pending");
+    assert.equal(evaluated.buildStatus, "pending");
+    assert.equal(evaluated.testStatus, "pending");
+    assert.equal(evaluated.prUrl, undefined);
     assert.equal(evaluated.releaseApproved, false);
 
     const approved = integrationEngine.approveAndDeploy(evaluated, "Dikshant Duggal");
     assert.equal(approved.releaseApproved, true);
     assert.equal(approved.releaseApprovedBy, "Dikshant Duggal");
-    assert.equal(approved.deploymentStatus, "live");
-    assert.ok(approved.deploymentUrl);
+    assert.equal(approved.deploymentStatus, "not_started");
+    assert.equal(approved.deploymentUrl, undefined);
 
     repo.createOrUpdateRelease(approved);
     const stored = repo.getRelease(createdProject.id);
     assert.ok(stored);
-    assert.equal(stored.deploymentStatus, "live");
+    assert.equal(stored.deploymentStatus, "not_started");
   });
 });

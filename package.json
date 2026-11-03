@@ -30,7 +30,8 @@
     "frontend:activate": "node scripts/frontend-manager.js activate",
     "frontend:rollback": "node scripts/frontend-manager.js rollback",
     "test:replacement": "node --experimental-strip-types server/tests/frontendReplacement.test.ts",
-    "test:acceptance": "node --experimental-strip-types server/tests/liveAcceptanceTest.ts"
+    "test:acceptance": "node --experimental-strip-types server/tests/liveAcceptanceTest.ts",
+    "judge": "node scripts/judge-local.mjs"
   },
   "keywords": [
     "offline-first",

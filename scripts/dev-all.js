@@ -368,7 +368,8 @@ async function main() {
     path.join(ROOT_DIR, "web"),
     {
       UD_LOCAL_TARGET: "http://127.0.0.1:4100",
-      UD_API_TARGET: "http://127.0.0.1:4100",
+      UD_API_TARGET: "http://127.0.0.1:4000",
+      UD_DEVICE_DB: path.join(clientDataDir, "device-b.db"),
     }
   );
 
@@ -409,3 +410,5 @@ main().catch((err) => {
   error(`Launcher failed: ${err.message}`);
   shutdown();
 });
+
+

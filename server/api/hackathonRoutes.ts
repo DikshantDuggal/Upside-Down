@@ -32,32 +32,17 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
   const sseClients = new Map<string, Set<Response>>();
 
   function broadcastProjectEvent(projectId: string, eventType: string, payload: Record<string, unknown>) {
+    const event = { id: randomUUID(), source: "hackathon_mission_control", type: eventType,
+      timestamp: new Date().toISOString(), payload: { projectId, ...payload } };
+    // Persist even with no open browser; use the actual coordinator API.
+    coordinator?.publishEvent(event);
     const clients = sseClients.get(projectId);
-    if (!clients || clients.size === 0) return;
-
-    const data = JSON.stringify({
-      eventId: `evt-${randomUUID().slice(0, 8)}`,
-      projectId,
-      type: eventType,
-      timestamp: new Date().toISOString(),
-      payload,
-    });
-
+    if (!clients) return;
+    const data = JSON.stringify({ eventId: event.id, projectId, type: eventType,
+      timestamp: event.timestamp, payload });
     for (const client of clients) {
-      try {
-        client.write(`event: ${eventType}\ndata: ${data}\n\n`);
-      } catch {
-        clients.delete(client);
-      }
-    }
-
-    // Also record into coordinator activity log if available
-    if (coordinator) {
-      coordinator.recordActivity({
-        source: "hackathon_mission_control",
-        type: eventType,
-        payload,
-      });
+      try { client.write(`event: ${eventType}\ndata: ${data}\n\n`); }
+      catch { clients.delete(client); }
     }
   }
 
@@ -665,27 +650,8 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
   });
 
   // POST /api/hackathon/projects/:id/deploy
-  router.post("/hackathon/projects/:id/deploy", (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const tasks = repo.listTasks(req.params.id);
-      const current = repo.getRelease(req.params.id) || integrationEngine.evaluateRelease(req.params.id, tasks);
-
-      const deployed: IntegrationReleaseRecord = {
-        ...current,
-        deploymentStatus: "live",
-        deploymentUrl: "https://upside-down-demo.vercel.app",
-        deploymentEvidence: `Live production build verified: Assets generated at ${new Date().toISOString()} via Vercel integration webhook.`,
-        updatedAt: new Date().toISOString(),
-      };
-
-      const saved = repo.createOrUpdateRelease(deployed);
-      repo.updateProjectStatus(req.params.id, "deployed");
-
-      broadcastProjectEvent(req.params.id, "DEPLOYMENT_FINISHED", { release: saved });
-      res.json({ success: true, release: saved });
-    } catch (err) {
-      next(err);
-    }
+  router.post("/hackathon/projects/:id/deploy", (_req: Request, res: Response) => {
+    res.status(501).json({ success: false, code: "DEPLOYMENT_NOT_CONFIGURED", error: "Local prototype only. No deployment provider or verified CI is configured; no deployment was performed." });
   });
 
   // ==========================================

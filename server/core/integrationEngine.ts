@@ -82,16 +82,14 @@ export class IntegrationEngine {
       }
     }
 
-    const contractCheck = allCompleted ? "passed" : "pending";
-    const buildStatus = tasks.some((t) => t.status === "blocked") ? "failed" : "passed";
-    const testStatus = allCompleted ? "passed" : (completedOrReview.length > 0 ? "passed" : "pending");
+    const contractCheck = "pending"; // Completion metadata is not a verified contract check.
+    const buildStatus = "pending"; // No build executor is connected to this planner.
+    const testStatus = "pending"; // No CI result has been collected.
 
     return {
       id: `rel-${randomUUID().slice(0, 8)}`,
       projectId,
       branch: branchName,
-      prNumber: 42,
-      prUrl: `https://github.com/DikshantDuggal/Upside-Down/pull/42`,
       changedFiles: [...new Set(changedFiles)],
       collisionDetected: collision.hasCollision,
       collisionFiles: collision.collidingFiles,
@@ -119,11 +117,9 @@ export class IntegrationEngine {
       ...release,
       releaseApproved: true,
       releaseApprovedBy: approvedBy,
-      deploymentStatus: isLive ? "live" : "deploying",
-      deploymentUrl: isLive ? `https://upside-down-demo.vercel.app` : undefined,
-      deploymentEvidence: isLive
-        ? `Production release verified: Contract conformance clean, build verified, deployment artifact signed by ${approvedBy} at ${now}.`
-        : `Deployment queued: waiting for background worker to finalize release bundle.`,
+      deploymentStatus: "not_started",
+      deploymentUrl: undefined,
+      deploymentEvidence: "Local host review recorded. No CI execution or hosted deployment has been performed.",
       updatedAt: now,
     };
   }
