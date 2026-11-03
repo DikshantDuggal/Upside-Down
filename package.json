@@ -1,0 +1,36 @@
+{
+  "name": "upside-down",
+  "version": "1.0.0",
+  "description": "Offline-First Multi-Agent Coding Collaboration Platform",
+  "main": "server/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types server/index.ts",
+    "dev": "node --experimental-strip-types --watch server/index.ts",
+    "test": "node --experimental-strip-types server/tests/coordinator.test.ts && node --experimental-strip-types server/tests/agentEngine.test.ts",
+    "test:coordinator": "node --experimental-strip-types server/tests/coordinator.test.ts",
+    "test:agent": "node --experimental-strip-types server/tests/agentEngine.test.ts",
+    "test:contract": "node --experimental-strip-types --test server/core/__tests__/durability.test.ts server/core/__tests__/syncGateway.test.ts server/api/__tests__/eventReplay.test.ts server/api/__tests__/authProtocol.test.ts server/agents/__tests__/safety.test.ts server/agents/__tests__/jobs.test.ts server/api/__tests__/integration.test.ts",
+    "enroll": "node --experimental-strip-types server/api/enroll.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "keywords": [
+    "offline-first",
+    "multi-agent",
+    "hackathon",
+    "collaboration"
+  ],
+  "author": "Upside-Down Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.1",
+    "typescript": "^5.7.2"
+  }
+}
