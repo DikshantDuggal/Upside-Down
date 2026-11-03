@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDirs": ["..", ".integration/backend"] },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "../server/sync/router.ts", "../server/sync/tests/**/*.ts"]
+}
