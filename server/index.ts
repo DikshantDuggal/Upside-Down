@@ -15,6 +15,7 @@ import { CoordinatorService } from "./core/coordinator.ts";
 import { SyncEngine } from "./sync/syncEngine.ts";
 import { createApiRouter } from "./api/routes.ts";
 import { ExecutionPipeline } from "./agents/executionPipeline.ts";
+import { AuthManager } from "./core/auth.ts";
 
 export interface ServerInstance {
   app: Express;
@@ -23,6 +24,7 @@ export interface ServerInstance {
   syncEngine: SyncEngine;
   frontendController: FrontendController;
   executionPipeline: ExecutionPipeline;
+  authManager: AuthManager;
 }
 
 export function createServer(dbPath?: string): ServerInstance {
@@ -31,6 +33,7 @@ export function createServer(dbPath?: string): ServerInstance {
   const coordinator = new CoordinatorService(db);
   const syncEngine = new SyncEngine(db, coordinator);
   const frontendController = new FrontendController();
+  const authManager = new AuthManager(dbPath === ":memory:" ? undefined : path.dirname(resolvedDbPath));
 
   // Instantiate ExecutionPipeline with safe configuration
   const executionPipeline = new ExecutionPipeline(
@@ -72,7 +75,7 @@ export function createServer(dbPath?: string): ServerInstance {
   app.use(express.json());
 
   // Mount API router
-  app.use("/api", createApiRouter(coordinator, syncEngine, frontendController));
+  app.use("/api", createApiRouter(coordinator, syncEngine, frontendController, authManager));
 
   // Serve active Frontend assets
   const activePublicDir = frontendController.getActivePublicDir();
@@ -88,7 +91,7 @@ export function createServer(dbPath?: string): ServerInstance {
     }
   });
 
-  return { app, db, coordinator, syncEngine, frontendController, executionPipeline };
+  return { app, db, coordinator, syncEngine, frontendController, executionPipeline, authManager };
 }
 
 // Start standalone server when run directly

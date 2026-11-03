@@ -57,7 +57,19 @@ async function runBackendATests(): Promise<void> {
     // Test 2: SyncGateway Atomic Processing & Deduplication
     // -------------------------------------------------------------
     console.log("\n[RUN] Test 2: Testing SyncGateway atomic task creation & duplicate deduplication...");
-    const deviceId = "device-laptop-b-" + randomUUID().slice(0, 8);
+    const deviceId = randomUUID();
+    const deviceToken = "device-token-" + randomUUID();
+    const reviewerToken = "reviewer-fixture-token";
+    const pushHeaders = {
+      "Content-Type": "application/json",
+      "X-UD-Contract": "UD-IC/1.0",
+      "Authorization": `Bearer ${deviceToken}`,
+    };
+    const reviewerHeaders = {
+      "Content-Type": "application/json",
+      "X-UD-Contract": "UD-IC/1.0",
+      "Authorization": `Bearer ${reviewerToken}`,
+    };
     const clientTaskId = randomUUID();
     const event1: CommandEnvelope = {
       contractVersion: "UD-IC/1.0",
@@ -76,10 +88,7 @@ async function runBackendATests(): Promise<void> {
 
     const pushRes1 = await fetch(`${baseUrl}/sync/push`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-UD-Contract": "UD-IC/1.0",
-      },
+      headers: pushHeaders,
       body: JSON.stringify({
         contractVersion: "UD-IC/1.0",
         deviceId,
@@ -99,10 +108,7 @@ async function runBackendATests(): Promise<void> {
     // Resend exact identical event -> Deduplication check
     const pushRes2 = await fetch(`${baseUrl}/sync/push`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-UD-Contract": "UD-IC/1.0",
-      },
+      headers: pushHeaders,
       body: JSON.stringify({
         contractVersion: "UD-IC/1.0",
         deviceId,
@@ -131,7 +137,7 @@ async function runBackendATests(): Promise<void> {
     };
     const pushResReuse = await fetch(`${baseUrl}/sync/push`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: pushHeaders,
       body: JSON.stringify({
         contractVersion: "UD-IC/1.0",
         deviceId,
@@ -161,7 +167,7 @@ async function runBackendATests(): Promise<void> {
 
     const pushResGap = await fetch(`${baseUrl}/sync/push`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: pushHeaders,
       body: JSON.stringify({
         contractVersion: "UD-IC/1.0",
         deviceId,
@@ -188,7 +194,7 @@ async function runBackendATests(): Promise<void> {
     };
     const pushResSeq2 = await fetch(`${baseUrl}/sync/push`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: pushHeaders,
       body: JSON.stringify({
         contractVersion: "UD-IC/1.0",
         deviceId,
@@ -219,7 +225,7 @@ async function runBackendATests(): Promise<void> {
 
     const pushResStale = await fetch(`${baseUrl}/sync/push`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: pushHeaders,
       body: JSON.stringify({
         contractVersion: "UD-IC/1.0",
         deviceId,
@@ -238,8 +244,8 @@ async function runBackendATests(): Promise<void> {
     assert.strictEqual(taskUnmutated.revision, 2);
 
     // Verify conflict record exists via GET /api/sync/conflicts
-    const conflictsRes = await fetch(`${baseUrl}/sync/conflicts?status=open&contractVersion=UD-IC/1.0`, {
-      headers: { "X-UD-Contract": "UD-IC/1.0" },
+    const conflictsRes = await fetch(`${baseUrl}/sync/conflicts?status=open`, {
+      headers: reviewerHeaders,
     });
     assert.strictEqual(conflictsRes.status, 200);
     const conflictsPage = (await conflictsRes.json()) as any;
@@ -256,11 +262,7 @@ async function runBackendATests(): Promise<void> {
     // Test resolution: retry_proposal (transitioning assigned -> running validly at revision 2)
     const resolveRes = await fetch(`${baseUrl}/sync/conflicts/${conflictId}/resolve`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-UD-Contract": "UD-IC/1.0",
-        "X-Principal-Role": "reviewer",
-      },
+      headers: reviewerHeaders,
       body: JSON.stringify({
         resolution: "retry_proposal",
         expectedConflictRevision: 1,
@@ -284,7 +286,7 @@ async function runBackendATests(): Promise<void> {
     // -------------------------------------------------------------
     console.log("\n[RUN] Test 6: Pulling canonical event journal (GET /api/sync/pull)...");
     const pullRes1 = await fetch(`${baseUrl}/sync/pull?limit=5`, {
-      headers: { "X-UD-Contract": "UD-IC/1.0" },
+      headers: pushHeaders,
     });
     assert.strictEqual(pullRes1.status, 200);
     const pullData1 = (await pullRes1.json()) as any;
@@ -295,7 +297,7 @@ async function runBackendATests(): Promise<void> {
 
     // Test unknown epoch rejection (CURSOR_EXPIRED -> 410)
     const expiredPullRes = await fetch(`${baseUrl}/sync/pull?after=epoch-ancient:999`, {
-      headers: { "X-UD-Contract": "UD-IC/1.0" },
+      headers: pushHeaders,
     });
     assert.strictEqual(expiredPullRes.status, 410);
     const expiredData = (await expiredPullRes.json()) as any;
@@ -336,7 +338,7 @@ async function runBackendATests(): Promise<void> {
     // 2. Approve patch in verified_application mode
     const approveRes = await fetch(`${baseUrl}/patches/${patch.id}/approve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${reviewerToken}` },
       body: JSON.stringify({ reviewerId: "lead-reviewer" }),
     });
     assert.strictEqual(approveRes.status, 200);
@@ -349,7 +351,7 @@ async function runBackendATests(): Promise<void> {
     // 3. Explicit /apply endpoint
     const applyRes = await fetch(`${baseUrl}/patches/${patch.id}/apply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${reviewerToken}` },
       body: JSON.stringify({
         expectedTaskRevision: 4,
         expectedBaseCommit: "fa00112233",
@@ -392,7 +394,7 @@ async function runBackendATests(): Promise<void> {
     // Attempt to apply malicious diff
     const malApplyRes = await fetch(`${baseUrl}/patches/${malPatch.id}/apply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${reviewerToken}` },
       body: JSON.stringify({
         expectedTaskRevision: 3,
         expectedBaseCommit: "HEAD",

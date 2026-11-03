@@ -76,7 +76,7 @@ export class FrontendController {
             id: "team",
             name: "Upside-Down Official Team Frontend",
             version: "1.0.0",
-            sourceDir: "frontend",
+            sourceDir: "web",
             distDir: "public/team",
             bundleFile: "public/team/app.js",
             htmlFile: "public/team/index.html",
@@ -106,7 +106,9 @@ export class FrontendController {
     const config = this.getConfig();
     const active = config.availableFrontends[config.activeFrontend] || config.availableFrontends.demo;
     const resolvedPublicDir = path.resolve(this.rootDir, active.distDir);
-    const bundleExists = fs.existsSync(path.resolve(this.rootDir, active.bundleFile));
+    const bundleExists = fs.existsSync(path.resolve(this.rootDir, active.bundleFile)) ||
+      fs.existsSync(path.resolve(this.rootDir, active.distDir, "assets")) ||
+      fs.existsSync(path.resolve(this.rootDir, active.distDir, "app.js"));
     const htmlExists = fs.existsSync(path.resolve(this.rootDir, active.htmlFile));
 
     return {
@@ -144,9 +146,13 @@ export class FrontendController {
     const errors: string[] = [];
     const warnings: string[] = [];
 
+    const defaultCandidate = fs.existsSync(path.resolve(this.rootDir, "web"))
+      ? path.resolve(this.rootDir, "web")
+      : path.resolve(this.rootDir, "frontend");
+
     const targetDir = candidateDirOrPath
       ? (path.isAbsolute(candidateDirOrPath) ? candidateDirOrPath : path.resolve(this.rootDir, candidateDirOrPath))
-      : path.resolve(this.rootDir, "frontend");
+      : defaultCandidate;
 
     if (!fs.existsSync(targetDir)) {
       errors.push(`Candidate directory does not exist: ${targetDir}`);
@@ -155,6 +161,8 @@ export class FrontendController {
 
     // Check entry points
     const possibleEntrypoints = [
+      path.join(targetDir, "src", "main.tsx"),
+      path.join(targetDir, "src", "app", "App.tsx"),
       path.join(targetDir, "src", "index.tsx"),
       path.join(targetDir, "src", "index.ts"),
       path.join(targetDir, "src", "App.tsx"),
@@ -227,6 +235,23 @@ export class FrontendController {
       const teamDist = path.resolve(this.rootDir, "public", "team");
       if (!fs.existsSync(teamDist)) {
         fs.mkdirSync(teamDist, { recursive: true });
+      }
+
+      // Check if candidate is web (Vite app)
+      const isViteProject = fs.existsSync(path.join(validation.candidateDir, "vite.config.ts")) ||
+        fs.existsSync(path.join(validation.candidateDir, "src", "main.tsx"));
+      const webDist = path.join(validation.candidateDir, "dist");
+
+      if (isViteProject) {
+        if (!fs.existsSync(webDist) || !fs.existsSync(path.join(webDist, "index.html"))) {
+          execSync("npm run build", {
+            cwd: validation.candidateDir,
+            stdio: "pipe",
+          });
+        }
+        if (fs.existsSync(webDist)) {
+          fs.cpSync(webDist, teamDist, { recursive: true });
+        }
       }
 
       const teamEntry = path.join(validation.candidateDir, "src", "index.tsx");

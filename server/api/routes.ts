@@ -17,13 +17,20 @@ import type { TaskStatus } from "../../contracts/task.ts";
 import type { SyncEngine } from "../sync/syncEngine.ts";
 import type { SyncEvent } from "../../contracts/sync.ts";
 import type { Principal } from "../core/syncGateway.ts";
+import { createSyncRouter } from "../sync/router.ts";
+import { AuthManager } from "../core/auth.ts";
 
 export function createApiRouter(
   coordinator: CoordinatorService,
   syncEngine?: SyncEngine,
-  frontendController?: FrontendController
+  frontendController?: FrontendController,
+  authManager?: AuthManager
 ): Router {
   const router = Router();
+  const auth = authManager || new AuthManager();
+
+  // Populate authenticated principal from Authorization header
+  router.use(auth.middleware());
 
   // --- Health Check ---
   router.get("/health", (_req: Request, res: Response) => {
@@ -333,7 +340,7 @@ export function createApiRouter(
     }
   });
 
-  router.post("/patches/:id/approve", (req: Request, res: Response, next: NextFunction) => {
+  router.post("/patches/:id/approve", auth.requireReviewer(), (req: Request, res: Response, next: NextFunction) => {
     try {
       const patchId = String(req.params.id);
       const { reviewerId } = req.body;
@@ -357,7 +364,7 @@ export function createApiRouter(
 
   // --- Verified Application Workflow (UD-IC/1.0 Section 6 & 15) ---
 
-  router.post("/patches/:id/apply", (req: Request, res: Response, next: NextFunction) => {
+  router.post("/patches/:id/apply", auth.requireReviewer(), (req: Request, res: Response, next: NextFunction) => {
     try {
       const patchId = String(req.params.id);
       const reviewerId = (req.body?.reviewerId as string) || "lead-engineer";
@@ -407,237 +414,58 @@ export function createApiRouter(
     }
   });
 
-  // --- Canonical Gateway Endpoints (UD-IC/1.0 Section 6) ---
-
-  router.post("/sync/push", async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { contractVersion, deviceId, events } = req.body;
-      if (contractVersion !== "UD-IC/1.0" || !deviceId || !Array.isArray(events)) {
-        throw new ValidationError(
-          "Invalid push batch format. Expected contractVersion 'UD-IC/1.0', deviceId, and events array."
-        );
-      }
-
-      const authHeader = req.headers.authorization;
-      let principalRole: "device" | "reviewer" | "admin" = "device";
-      if (req.headers["x-principal-role"] === "reviewer" || req.headers["x-principal-role"] === "admin") {
-        principalRole = req.headers["x-principal-role"] as any;
-      } else if (authHeader && authHeader.toLowerCase().includes("reviewer")) {
-        principalRole = "reviewer";
-      }
-
-      const principal: Principal = {
-        id: (req.headers["x-principal-id"] as string) || (authHeader ? authHeader.replace(/^Bearer\s+/i, "") : deviceId),
-        deviceId,
-        role: principalRole,
-      };
-
-      const acks = [];
-      let receivedThrough = 0;
-
-      for (const ev of events) {
-        const ack = await coordinator.process(ev, principal);
-        acks.push(ack);
-        if (
-          ack.status === "applied" ||
-          ack.status === "conflict" ||
-          ack.status === "rejected"
-        ) {
-          receivedThrough = Math.max(receivedThrough, ack.sequence);
-        }
-      }
-
-      res.setHeader("X-UD-Contract", "UD-IC/1.0");
+  // --- Legacy Synchronization Endpoints (Demo Adapter) ---
+  if (syncEngine) {
+    router.get("/sync/status", (_req: Request, res: Response) => {
+      const pendingOutbox = syncEngine.getPendingOutbox();
+      const conflicts = syncEngine.getConflicts(false);
       res.json({
-        contractVersion: "UD-IC/1.0",
-        acks,
-        receivedThrough,
-        serverTime: new Date().toISOString(),
+        enabled: true,
+        deviceId: syncEngine.getDeviceId(),
+        isOnline: syncEngine.getOnlineStatus(),
+        pendingOutboxCount: pendingOutbox.length,
+        unresolvedConflictsCount: conflicts.length,
       });
-    } catch (err) {
-      next(err);
-    }
-  });
+    });
 
-  router.get("/sync/pull", async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const after = req.query.after as string | undefined;
-      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
-      const authHeader = req.headers.authorization;
-      let principalRole: "device" | "reviewer" | "admin" = "device";
-      if (req.headers["x-principal-role"] === "reviewer" || req.headers["x-principal-role"] === "admin") {
-        principalRole = req.headers["x-principal-role"] as any;
-      } else if (authHeader && authHeader.toLowerCase().includes("reviewer")) {
-        principalRole = "reviewer";
-      }
-      const deviceId = (req.headers["x-device-id"] as string) || (authHeader ? authHeader.replace(/^Bearer\s+/i, "") : "anonymous-device");
-      const principal: Principal = {
-        id: (req.headers["x-principal-id"] as string) || deviceId,
-        deviceId,
-        role: principalRole,
-      };
+    router.post("/sync/toggle-online", (req: Request, res: Response) => {
+      const online = req.body.online === undefined ? true : Boolean(req.body.online);
+      syncEngine.setOnlineStatus(online);
+      res.json({
+        status: "ok",
+        isOnline: syncEngine.getOnlineStatus(),
+      });
+    });
 
-      const pullResponse = await coordinator.pull(after, limit, principal);
-      res.setHeader("X-UD-Contract", "UD-IC/1.0");
-      res.json(pullResponse);
-    } catch (err: any) {
-      if (err && err.code === "CURSOR_EXPIRED") {
-        res.status(410).json({
-          error: "Gone",
-          code: "CURSOR_EXPIRED",
-          message: err.message || "Cursor has expired",
-          requestId: randomUUID(),
-          retryable: false,
-        });
-        return;
-      }
-      next(err);
-    }
-  });
+    router.get("/sync/outbox", (_req: Request, res: Response) => {
+      res.json(syncEngine.getPendingOutbox());
+    });
 
-  router.get("/sync/conflicts", async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      // If UD-IC/1.0 request
-      if (
-        req.headers["x-ud-contract"] === "UD-IC/1.0" ||
-        req.query.contractVersion === "UD-IC/1.0"
-      ) {
-        const status = (req.query.status as "open" | "resolved") || "open";
-        const after = req.query.after as string | undefined;
-        const page = await coordinator.listConflicts(status, after);
-        res.setHeader("X-UD-Contract", "UD-IC/1.0");
-        res.json(page);
-        return;
-      }
-
-      // Fallback to legacy syncEngine if attached
-      if (syncEngine) {
-        const resolvedFilter =
-          req.query.resolved !== undefined
-            ? req.query.resolved === "true"
-            : undefined;
-        res.json(syncEngine.getConflicts(resolvedFilter));
-        return;
-      }
-
-      const page = await coordinator.listConflicts("open");
-      res.json(page);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  router.post(
-    "/sync/conflicts/:id/resolve",
-    async (req: Request, res: Response, next: NextFunction) => {
+    router.post("/sync/flush", async (_req: Request, res: Response, next: NextFunction) => {
       try {
-        const conflictId = String(req.params.id);
-
-        if (
-          req.body.expectedConflictRevision !== undefined ||
-          req.headers["x-ud-contract"] === "UD-IC/1.0"
-        ) {
-          const authHeader = req.headers.authorization;
-          let principalRole: "device" | "reviewer" | "admin" = "reviewer";
-          if (req.headers["x-principal-role"] === "reviewer" || req.headers["x-principal-role"] === "admin") {
-            principalRole = req.headers["x-principal-role"] as any;
-          }
-          const principal: Principal = {
-            id: (req.headers["x-principal-id"] as string) || (authHeader ? authHeader.replace(/^Bearer\s+/i, "") : "reviewer-1"),
-            deviceId: (req.headers["x-device-id"] as string) || "reviewer-device",
-            role: principalRole,
-          };
-          const resolved = await coordinator.resolve(conflictId, req.body, principal);
-          res.setHeader("X-UD-Contract", "UD-IC/1.0");
-          res.json(resolved);
-          return;
-        }
-
-        if (syncEngine) {
-          const { resolution, customPayload } = req.body;
-          if (!resolution) {
-            throw new ValidationError("resolution is required");
-          }
-          syncEngine.resolveConflict(conflictId, resolution, customPayload);
-          res.json({ status: "ok", conflictId, resolution });
-          return;
-        }
-
-        throw new ValidationError("Resolution parameters invalid");
+        const result = await syncEngine.flushOutbox();
+        res.json(result);
       } catch (err) {
         next(err);
       }
-    }
-  );
-
-  // --- Synchronization Endpoints (Legacy Adapter) ---
-
-  router.get("/sync/status", (_req: Request, res: Response) => {
-    if (!syncEngine) {
-      res.json({ enabled: false, message: "Sync engine not attached" });
-      return;
-    }
-    const pendingOutbox = syncEngine.getPendingOutbox();
-    const conflicts = syncEngine.getConflicts(false);
-    res.json({
-      enabled: true,
-      deviceId: syncEngine.getDeviceId(),
-      isOnline: syncEngine.getOnlineStatus(),
-      pendingOutboxCount: pendingOutbox.length,
-      unresolvedConflictsCount: conflicts.length,
     });
-  });
 
-  router.post("/sync/toggle-online", (req: Request, res: Response) => {
-    if (!syncEngine) {
-      res.status(400).json({ error: "Sync engine not attached" });
-      return;
-    }
-    const online = req.body.online === undefined ? true : Boolean(req.body.online);
-    syncEngine.setOnlineStatus(online);
-    res.json({
-      status: "ok",
-      isOnline: syncEngine.getOnlineStatus(),
-    });
-  });
-
-  router.get("/sync/outbox", (_req: Request, res: Response) => {
-    if (!syncEngine) {
-      res.json([]);
-      return;
-    }
-    res.json(syncEngine.getPendingOutbox());
-  });
-
-  router.post("/sync/flush", async (_req: Request, res: Response, next: NextFunction) => {
-    if (!syncEngine) {
-      res.status(400).json({ error: "Sync engine not attached" });
-      return;
-    }
-    try {
-      const result = await syncEngine.flushOutbox();
-      res.json(result);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  router.post("/sync/events", (req: Request, res: Response, next: NextFunction) => {
-    if (!syncEngine) {
-      res.status(400).json({ error: "Sync engine not attached" });
-      return;
-    }
-    try {
-      const event = req.body as SyncEvent;
-      if (!event.eventId || !event.deviceId || !event.type) {
-        throw new ValidationError("eventId, deviceId, and type are required for sync events");
+    router.post("/sync/events", (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const event = req.body as SyncEvent;
+        if (!event.eventId || !event.deviceId || !event.type) {
+          throw new ValidationError("eventId, deviceId, and type are required for sync events");
+        }
+        const result = syncEngine.ingestIncomingEvent(event);
+        res.status(result.status === "conflict" ? 409 : 200).json(result);
+      } catch (err) {
+        next(err);
       }
-      const result = syncEngine.ingestIncomingEvent(event);
-      res.status(result.status === "conflict" ? 409 : 200).json(result);
-    } catch (err) {
-      next(err);
-    }
-  });
+    });
+  }
+
+  // --- Canonical UD-IC/1.0 Sync Gateway Router (Backend B) ---
+  router.use("/sync", createSyncRouter(coordinator, auth.middleware()));
 
   // --- Frontend Replacement / Handoff Endpoints ---
 

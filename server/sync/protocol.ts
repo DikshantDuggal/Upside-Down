@@ -85,5 +85,12 @@ export function canonicalJson(value: unknown): string {
 }
 export function bodyHash(value: unknown) { return createHash("sha256").update(canonicalJson(value)).digest("hex"); }
 export function safeError(error: unknown): ProtocolError {
-  return error instanceof ProtocolError ? error : new ProtocolError(500, "INTERNAL_ERROR", "The operation could not be completed");
+  if (error instanceof ProtocolError) return error;
+  if (error && typeof error === "object") {
+    const err = error as any;
+    if (err.code === "CURSOR_EXPIRED") {
+      return new ProtocolError(410, "CURSOR_EXPIRED", err.message || "Cursor has expired");
+    }
+  }
+  return new ProtocolError(500, "INTERNAL_ERROR", "The operation could not be completed");
 }

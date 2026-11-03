@@ -140,7 +140,18 @@ To execute across two distinct physical laptops:
 
 ## 6. Startup Runbook & Demonstration Guide
 
-### Quickstart Scripts
+### One-Command Unified Launcher (Preferred)
+```bash
+# Starts Coordinator (:4000), Client-Local (:4100), and Official Frontend (:5173) simultaneously:
+npm run dev:all
+```
+- Performs full environment pre-flight (Node >= 20, npm, dependencies in root, `client-local`, `web`).
+- Ensures database write permissions and automated port recovery.
+- Synchronizes separate device vs. reviewer security credentials.
+- Streams real-time color-coded logs: `[COORDINATOR:4000]` (green), `[LOCAL-SYNC:4100]` (yellow), `[FRONTEND:5173]` (cyan).
+- Handles graceful shutdown of all processes upon Ctrl+C (SIGINT/SIGTERM).
+
+### Individual Quickstart Scripts
 
 #### Step 1: Start Authoritative Coordinator (Computer A)
 ```powershell

@@ -16,3 +16,8 @@ build/
 .board/
 .DS_Store
 Thumbs.db
+
+data/
+client-local/data/
+*.db-wal
+
