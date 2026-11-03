@@ -80,6 +80,20 @@ export async function createLocalService(options: LocalOptions) {
       if (!session || session.expires < Date.now()) throw new ProtocolError(401, "LOCAL_SESSION_REQUIRED", "Pair this browser with the local service");
       if (write && (typeof req.headers["x-csrf-token"] !== "string" || !same(req.headers["x-csrf-token"], session.csrf))) throw new ProtocolError(403, "CSRF_REQUIRED", "Valid X-CSRF-Token required");
       if (url.pathname === "/local/session" && req.method === "GET") { json(res, 200, { contractVersion: VERSION, csrfToken: session.csrf }); return; }
+      if (url.pathname === "/local/authorization" && req.method === "GET") {
+        // Never infer authority from pairing, a configured filename or cached capabilities.
+        let authorization = { role: "device", canReview: false };
+        if (options.reviewerClient) {
+          try {
+            const capabilities = await options.reviewerClient.request("/api/capabilities");
+            const verified = capabilities?.authorization;
+            if (capabilities?.contractVersion === VERSION && verified?.canReview === true && ["reviewer", "admin"].includes(verified.role)) {
+              authorization = { role: verified.role, canReview: true };
+            }
+          } catch { /* Unreachable, revoked or malformed authority cannot grant browser rights. */ }
+        }
+        json(res, 200, { contractVersion: VERSION, authorization }); return;
+      }
       if (url.pathname === "/local/health" && req.method === "GET") { json(res, 200, store.health()); return; }
       if (url.pathname === "/local/state" && req.method === "GET") { json(res, 200, store.state()); return; }
       if (url.pathname === "/local/commands" && req.method === "POST") {

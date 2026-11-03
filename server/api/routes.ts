@@ -44,9 +44,21 @@ export function createApiRouter(
   });
 
   // --- Capabilities (UD-IC/1.0 Section 6) ---
-  router.get("/capabilities", (_req: Request, res: Response) => {
+  router.get("/capabilities", (req: Request, res: Response) => {
     res.setHeader("X-UD-Contract", "UD-IC/1.0");
-    res.json(coordinator.getCapabilities());
+    const caps = coordinator.getCapabilities();
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace(/^Bearer\s+/i, "").trim() : undefined;
+    const principal = token ? auth.verifyToken(token) : undefined;
+    const role = principal?.role || "device";
+    const canReview = role === "reviewer" || role === "admin";
+    res.json({
+      ...caps,
+      authorization: {
+        role,
+        canReview,
+      },
+    });
   });
 
   // --- Project Endpoints ---

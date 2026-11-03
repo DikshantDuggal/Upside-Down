@@ -72,6 +72,14 @@ export class ExecutionPipeline {
     this.watcher.stop();
   }
 
+  public async shutdown(): Promise<void> {
+    this.stop();
+  }
+
+  public async recover(): Promise<void> {}
+
+  public kick(): void {}
+
   public pause(): void {
     this.watcher.pause();
   }

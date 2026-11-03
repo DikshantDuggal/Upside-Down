@@ -147,6 +147,15 @@ test("fixture UI: stale conflict resolution refreshes revisions without automati
   page,
 }) => {
   await mockServices(page, { ...localState, conflicts: [conflict] });
+  await page.route("http://127.0.0.1:5173/local/authorization", (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: CONTRACT,
+        authorization: { role: "reviewer", canReview: true },
+      },
+      headers: { "X-UD-Contract": CONTRACT },
+    }),
+  );
   let currentRevision = 3;
   const proposals: Record<string, unknown>[] = [];
   await page.route(`http://127.0.0.1:5173/api/tasks/${task.id}`, (route) =>

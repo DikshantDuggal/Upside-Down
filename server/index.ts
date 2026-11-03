@@ -91,7 +91,17 @@ export function createServer(dbPath?: string): ServerInstance {
     }
   });
 
-  return { app, db, coordinator, syncEngine, frontendController, executionPipeline, authManager };
+  return {
+    app,
+    db,
+    coordinator,
+    syncEngine,
+    frontendController,
+    executionPipeline,
+    authManager,
+    auth: authManager,
+    jobs: executionPipeline,
+  };
 }
 
 // Start standalone server when run directly

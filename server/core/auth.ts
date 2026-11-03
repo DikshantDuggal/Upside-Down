@@ -126,6 +126,33 @@ export class AuthManager {
     });
   }
 
+  public enroll(deviceId: string, role: "device" | "reviewer" | "admin" = "device"): { token: string; principal: EnrolledToken } {
+    const token = randomBytes(32).toString("base64url");
+    const id = randomUUID();
+    const principal: EnrolledToken = { token, id, deviceId, role };
+    if (role === "device") {
+      this.deviceTokens.set(token, principal);
+    } else {
+      this.reviewerTokens.set(token, principal);
+    }
+    return { token, principal };
+  }
+
+  public authenticate(token: string | undefined): Principal {
+    const principal = token ? this.verifyToken(token) : undefined;
+    if (!principal) throw new Error("UNAUTHORIZED");
+    return principal;
+  }
+
+  public revoke(id: string): void {
+    for (const [token, principal] of this.reviewerTokens) {
+      if (principal.id === id) this.reviewerTokens.delete(token);
+    }
+    for (const [token, principal] of this.deviceTokens) {
+      if (principal.id === id) this.deviceTokens.delete(token);
+    }
+  }
+
   public enrollDevice(token: string, id: string, deviceId: string): void {
     if (!token || !deviceId) return;
     this.deviceTokens.set(token, {
@@ -260,3 +287,6 @@ export class AuthManager {
     };
   }
 }
+
+export { AuthManager as AuthenticationService };
+export type { Principal as AuthenticatedPrincipal };
