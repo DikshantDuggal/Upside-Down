@@ -11,7 +11,7 @@
     "build:frontend": "npm run build:demo && npm run build:team",
     "build": "npm run build:demo && npm run build:team && tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types server/tests/environment.test.ts && node --experimental-strip-types server/tests/coordinator.test.ts && node --experimental-strip-types server/tests/agentEngine.test.ts && node --experimental-strip-types server/tests/syncOffline.test.ts && node --experimental-strip-types server/tests/dashboardE2E.test.ts && node --experimental-strip-types server/tests/multiAgentDemo.test.ts && node --experimental-strip-types server/tests/frontendReplacement.test.ts && node --experimental-strip-types server/tests/backendAUdic.test.ts && node --experimental-strip-types server/tests/multiComputerIntegration.test.ts",
+    "test": "node --experimental-strip-types server/tests/environment.test.ts && node --experimental-strip-types server/tests/coordinator.test.ts && node --experimental-strip-types server/tests/agentEngine.test.ts && node --experimental-strip-types server/tests/syncOffline.test.ts && node --experimental-strip-types server/tests/dashboardE2E.test.ts && node --experimental-strip-types server/tests/multiAgentDemo.test.ts && node --experimental-strip-types server/tests/frontendReplacement.test.ts && node --experimental-strip-types server/tests/backendAUdic.test.ts && node --experimental-strip-types server/tests/multiComputerIntegration.test.ts && node --experimental-strip-types server/tests/liveAcceptanceTest.ts",
     "test:multi-computer": "node --experimental-strip-types server/tests/multiComputerIntegration.test.ts",
     "test:env": "node --experimental-strip-types server/tests/environment.test.ts",
     "test:coordinator": "node --experimental-strip-types server/tests/coordinator.test.ts",
@@ -27,7 +27,8 @@
     "frontend:status": "node scripts/frontend-manager.js status",
     "frontend:activate": "node scripts/frontend-manager.js activate",
     "frontend:rollback": "node scripts/frontend-manager.js rollback",
-    "test:replacement": "node --experimental-strip-types server/tests/frontendReplacement.test.ts"
+    "test:replacement": "node --experimental-strip-types server/tests/frontendReplacement.test.ts",
+    "test:acceptance": "node --experimental-strip-types server/tests/liveAcceptanceTest.ts"
   },
   "keywords": [
     "offline-first",
