@@ -164,6 +164,7 @@ export class LocalStore {
     const change = this.transaction(() => {
       for (const event of page.events) this.db.prepare("INSERT OR IGNORE INTO inbox VALUES(?,?)").run(event.id, JSON.stringify(event));
       for (const snapshot of snapshots) this.entity(snapshot.kind, snapshot.id, snapshot.value);
+      for (const snapshot of snapshots) if (snapshot.kind === "patches") this.db.prepare("DELETE FROM cache WHERE path=?").run(`/api/patches/${snapshot.id}`);
       if (snapshots.some(snapshot => snapshot.kind === "tasks")) this.db.exec("DELETE FROM cache WHERE path='/api/tasks' OR path LIKE '/api/tasks?%' OR path LIKE '/api/tasks/%'");
       hook?.();
       if (page.events.length) this.set("epoch", page.events[0].coordinatorEpoch);

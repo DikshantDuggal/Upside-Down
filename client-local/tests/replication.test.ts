@@ -12,6 +12,32 @@ import { createLocalService } from "../src/server.ts";
 import { CoordinatorClient, SyncWorker } from "../src/transport.ts";
 import { bodyHash, VERSION } from "../../server/sync/protocol.ts";
 
+test("application and run events refresh their nested patch snapshots before advancing the cache", async () => {
+  const store = new LocalStore(":memory:");
+  store.set("remoteCursor", "previous");
+  const patchId = randomUUID();
+  const client = new CoordinatorClient("http://127.0.0.1", "fixture");
+  const requests: string[] = [];
+  client.request = async path => { requests.push(path); return { id: patchId, applicationStatus: "verified" }; };
+  const worker = new SyncWorker(store, client);
+  try {
+    const snapshots = await worker.hydrate({ contractVersion: VERSION, nextCursor: "next", hasMore: false,
+      serverTime: new Date().toISOString(), events: [
+        { id: randomUUID(), contractVersion: VERSION, coordinatorEpoch: "test", cursor: "1", source: "test",
+          timestamp: new Date().toISOString(), type: "patch_application_changed", payload: { application: { patchId, status: "verified" } } },
+        { id: randomUUID(), contractVersion: VERSION, coordinatorEpoch: "test", cursor: "2", source: "test",
+          timestamp: new Date().toISOString(), type: "run_changed", payload: { run: { patchId } } },
+      ] });
+    assert.deepEqual(snapshots, [{ kind: "patches", id: patchId, value: { id: patchId, applicationStatus: "verified" } }]);
+    assert.deepEqual(requests, [`/api/patches/${patchId}`]);
+    store.cacheWrite(`/api/patches/${patchId}`, { id: patchId, applicationStatus: "applying" });
+    store.applyPull({ contractVersion: VERSION, events: [], nextCursor: "next", hasMore: false,
+      serverTime: new Date().toISOString() }, snapshots);
+    assert.equal(store.cacheRead(`/api/patches/${patchId}`), undefined);
+    assert.equal(store.state().patches[0].applicationStatus, "verified");
+  } finally { store.close(); }
+});
+
 /** Durable HTTP protocol fixture, NOT Backend A's production gateway or acceptance evidence. */
 async function coordinator(filename: string) {
   const db = new DatabaseSync(filename);
