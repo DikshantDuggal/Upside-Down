@@ -2,7 +2,7 @@
 
 Implementation for issue #5, branch `5-backend-b-sync`, contract **UD-IC/1.0**.
 This is an integration foundation. Backend A's production gateway, enrollment,
-reviewer sessions, and the frontend handshake still need integration and acceptance.
+reviewer sessions, and the frontend handshake still need joint runtime integration.
 Do not advertise the complete sync MVP as verified yet.
 
 ## Scope and current behavior
@@ -10,7 +10,8 @@ Do not advertise the complete sync MVP as verified yet.
 Arhaan owns `client-local/`, `server/sync/`, and `contracts/sync.ts`.
 The branch starts at `origin/main` `19130ab`; it does not merge or modify A's backend.
 Compatibility checks use read-only source types from backend
-`ec73ff7b1fcc16645484709ea92c51d9dfc46068`.
+`4db4c561caacd867c67a33d5cacb9c5494f8a774`, published by A during this work.
+The originally supplied `ec73ff7` baseline was also typechecked successfully.
 
 - Native Node SQLite with WAL, FULL synchronous commits and a bounded busy timeout.
 - Persistent device UUID, sequence allocation, immutable outbox, browser request keys,
@@ -89,11 +90,11 @@ filesystem ACLs. The service requests mode 0600 on creation, which does not itse
 Windows ACL protection. No credentials are placed in Vite variables or SSE URLs.
 HTTP on a private trusted demo LAN is the current transport assumption.
 
-## Proposed browser handshake (team acceptance pending)
+## Accepted browser handshake
 
-The board proposal is comment `6613877596`. These bootstrap routes supplement the supplied
-contract and are implemented on this draft branch for review; frontend integration must
-use the agreed final handshake.
+The board proposal is comment `6613877596`, accepted by A in `6614132100` and frontend
+in `6614135924`. These additive bootstrap routes are agreed; joint runtime integration
+and reviewer authority are still pending.
 
 1. Through the same-origin Vite proxy, POST `/local/session` with
    `{ "pairingKey": "<value from the private local .session.json file>" }`.
@@ -146,8 +147,9 @@ authorization. A must preserve earlier commits when a later batch command fails.
 
 Open integration details:
 
-- Confirm backend baseline/mount and deliver A's actual authenticated transactional gateway.
-- Confirm the proposed local session handshake with frontend.
+- A confirmed `4db4c56` as shared backend baseline in `6614132100`; the actual authenticated
+  transactional gateway and startup mount remain pending.
+- Wire the accepted local session handshake to frontend and verify against the running service.
 - The existing gateway interface exposes no progress accessor. Router `receivedThrough`
   is currently a conservative confirmed prefix from terminal acks or SEQUENCE_GAP's
   `expectedSequence`, defaulting to 0 when it cannot know. Agree exact reporting if A
@@ -155,9 +157,9 @@ Open integration details:
 - Resolve-request idempotency keys are not present in the supplied gateway signature.
   A must provide an approved request-scoped idempotency mechanism before claiming that
   repeated resolutions replay the original result.
-- No message-read route exists. The draft hydrator expects a complete `Message` in
-  `payload.message` on `message_sent` (also recognizes `message.sent`). This convention
-  is proposed, not yet accepted. Missing/unauthorized snapshots stop cursor advancement.
+- No message-read route exists. A accepted a complete `Message` in `payload.message` on
+  `message_sent` in `6614132100` (the hydrator also recognizes `message.sent`).
+  Missing/unauthorized snapshots stop cursor advancement.
 - A's complete retained journal must represent all state needed to rebuild a device;
   legacy timestamp history is not an adequate substitute. Initial replay fetches current
   tasks/agents/patches/conflicts before committing a page.

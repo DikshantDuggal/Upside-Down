@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const sha = "ec73ff7b1fcc16645484709ea92c51d9dfc46068";
+const sha = "4db4c561caacd867c67a33d5cacb9c5494f8a774";
 for (const file of ["contracts/task.ts", "contracts/events.ts", "contracts/agent.ts", "server/db/database.ts"]) {
   const body = execFileSync("git", ["show", `${sha}:${file}`], { cwd: root, encoding: "utf8" });
   const dest = resolve(root, "client-local/.integration/backend", file);

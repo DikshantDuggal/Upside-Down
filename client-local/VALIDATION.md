@@ -4,7 +4,8 @@ Date: 4 November 2026 (Asia/Calcutta).
 
 Environment: Windows, Node v24.22.0, npm 11.19.1.
 Source branch: `5-backend-b-sync`, based on `19130ab` (setup-only main).
-Backend type fixture: `ec73ff7b1fcc16645484709ea92c51d9dfc46068`.
+Backend type fixture: `4db4c561caacd867c67a33d5cacb9c5494f8a774` (newly published A foundation).
+The originally supplied `ec73ff7b1fcc16645484709ea92c51d9dfc46068` fixture also passed.
 Input `contract.md` SHA-256:
 `377ab00964ce777a40816a1debd9f666c3873f9ffad44f33ee0557960a88bd60`.
 
