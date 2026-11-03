@@ -1,1 +1,18 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+
+# Local databases & logs
+*.db
+*.db-journal
+*.log
+
+# Environment & Board local state
+.env
 .board/
+.DS_Store
+Thumbs.db
