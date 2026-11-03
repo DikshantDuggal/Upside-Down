@@ -10,6 +10,19 @@ import path from "node:path";
 import type { Task, TaskStatus } from "../../contracts/task.ts";
 import type { ActivityEvent } from "../../contracts/events.ts";
 import type { AgentInfo } from "../../contracts/agent.ts";
+import type { SyncEvent, ConflictRecord } from "../../contracts/sync.ts";
+
+export interface OutboxItem {
+  id: string;
+  eventId: string;
+  destination: string;
+  status: "pending" | "delivered" | "failed";
+  payload: Record<string, unknown>;
+  retryCount: number;
+  createdAt: string;
+  lastAttemptAt?: string;
+  errorMessage?: string;
+}
 
 export interface PatchRecord {
   id: string;
@@ -93,6 +106,47 @@ export class CoordinatorDatabase {
       );
 
       CREATE INDEX IF NOT EXISTS idx_patches_task ON patches(task_id);
+
+      CREATE TABLE IF NOT EXISTS sync_outbox (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        destination TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        payload TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        last_attempt_at TEXT,
+        error_message TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_outbox_status ON sync_outbox(status);
+
+      CREATE TABLE IF NOT EXISTS sync_events (
+        event_id TEXT PRIMARY KEY,
+        device_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        task_id TEXT,
+        base_revision INTEGER,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        received_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sync_device_seq ON sync_events(device_id, sequence);
+
+      CREATE TABLE IF NOT EXISTS conflicts (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        local_revision INTEGER NOT NULL,
+        incoming_revision INTEGER NOT NULL,
+        local_payload TEXT NOT NULL,
+        incoming_payload TEXT NOT NULL,
+        detected_at TEXT NOT NULL,
+        resolved INTEGER NOT NULL DEFAULT 0,
+        resolution TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_conflicts_task ON conflicts(task_id);
     `);
   }
 
@@ -348,6 +402,177 @@ export class CoordinatorDatabase {
     stmt.run(status, now, reviewerId || null, rejectionReason || null, id);
 
     return this.getPatch(id);
+  }
+
+  // --- Sync & Outbox Operations ---
+
+  public saveOutboxItem(item: OutboxItem): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO sync_outbox (id, event_id, destination, status, payload, retry_count, created_at, last_attempt_at, error_message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      item.id,
+      item.eventId,
+      item.destination,
+      item.status,
+      JSON.stringify(item.payload),
+      item.retryCount,
+      item.createdAt,
+      item.lastAttemptAt || null,
+      item.errorMessage || null
+    );
+  }
+
+  public getPendingOutbox(): OutboxItem[] {
+    const stmt = this.db.prepare(`
+      SELECT id, event_id as eventId, destination, status, payload, retry_count as retryCount,
+             created_at as createdAt, last_attempt_at as lastAttemptAt, error_message as errorMessage
+      FROM sync_outbox
+      WHERE status = 'pending'
+      ORDER BY created_at ASC
+    `);
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map((r) => {
+      let payload = {};
+      try {
+        payload = JSON.parse(String(r.payload || '{}'));
+      } catch {
+        payload = {};
+      }
+      return {
+        id: String(r.id),
+        eventId: String(r.eventId),
+        destination: String(r.destination),
+        status: r.status as OutboxItem['status'],
+        payload: payload as Record<string, unknown>,
+        retryCount: Number(r.retryCount),
+        createdAt: String(r.createdAt),
+        lastAttemptAt: r.lastAttemptAt ? String(r.lastAttemptAt) : undefined,
+        errorMessage: r.errorMessage ? String(r.errorMessage) : undefined,
+      };
+    });
+  }
+
+  public updateOutboxStatus(
+    id: string,
+    status: 'pending' | 'delivered' | 'failed',
+    errorMessage?: string
+  ): void {
+    const now = new Date().toISOString();
+    const stmt = this.db.prepare(`
+      UPDATE sync_outbox
+      SET status = ?, last_attempt_at = ?, retry_count = retry_count + 1, error_message = ?
+      WHERE id = ?
+    `);
+    stmt.run(status, now, errorMessage || null, id);
+  }
+
+  public saveSyncEvent(event: SyncEvent): boolean {
+    if (this.hasSyncEvent(event.eventId)) {
+      return false; // Duplicate suppressed
+    }
+    const now = new Date().toISOString();
+    const stmt = this.db.prepare(`
+      INSERT INTO sync_events (event_id, device_id, sequence, task_id, base_revision, type, payload, received_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      event.eventId,
+      event.deviceId,
+      event.sequence,
+      event.taskId || null,
+      event.baseRevision !== undefined ? event.baseRevision : null,
+      event.type,
+      JSON.stringify(event.payload),
+      now
+    );
+    return true;
+  }
+
+  public hasSyncEvent(eventId: string): boolean {
+    const stmt = this.db.prepare(`SELECT 1 FROM sync_events WHERE event_id = ?`);
+    const row = stmt.get(eventId);
+    return !!row;
+  }
+
+  public listSyncEvents(): SyncEvent[] {
+    const stmt = this.db.prepare(`
+      SELECT event_id as eventId, device_id as deviceId, sequence, task_id as taskId,
+             base_revision as baseRevision, type, payload
+      FROM sync_events
+      ORDER BY received_at ASC
+    `);
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map((r) => {
+      let payload = {};
+      try {
+        payload = JSON.parse(String(r.payload || '{}'));
+      } catch {
+        payload = {};
+      }
+      return {
+        eventId: String(r.eventId),
+        deviceId: String(r.deviceId),
+        sequence: Number(r.sequence),
+        taskId: r.taskId ? String(r.taskId) : undefined,
+        baseRevision: r.baseRevision !== null ? Number(r.baseRevision) : undefined,
+        type: String(r.type),
+        payload: payload as Record<string, unknown>,
+      };
+    });
+  }
+
+  public saveConflict(conflict: ConflictRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO conflicts (id, task_id, local_revision, incoming_revision, local_payload, incoming_payload, detected_at, resolved, resolution)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      conflict.id,
+      conflict.taskId,
+      conflict.localRevision,
+      conflict.incomingRevision,
+      JSON.stringify(conflict.localPayload),
+      JSON.stringify(conflict.incomingPayload),
+      conflict.detectedAt,
+      conflict.resolved ? 1 : 0,
+      conflict.resolution || null
+    );
+  }
+
+  public getConflicts(resolved?: boolean): ConflictRecord[] {
+    let sql = `
+      SELECT id, task_id as taskId, local_revision as localRevision, incoming_revision as incomingRevision,
+             local_payload as localPayload, incoming_payload as incomingPayload, detected_at as detectedAt,
+             resolved, resolution
+      FROM conflicts
+    `;
+    if (resolved !== undefined) {
+      sql += ` WHERE resolved = ${resolved ? 1 : 0}`;
+    }
+    sql += ` ORDER BY detected_at DESC`;
+    const rows = this.db.prepare(sql).all() as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: String(r.id),
+      taskId: String(r.taskId),
+      localRevision: Number(r.localRevision),
+      incomingRevision: Number(r.incomingRevision),
+      localPayload: JSON.parse(String(r.localPayload || '{}')),
+      incomingPayload: JSON.parse(String(r.incomingPayload || '{}')),
+      detectedAt: String(r.detectedAt),
+      resolved: Number(r.resolved) === 1,
+      resolution: r.resolution as ConflictRecord['resolution'],
+    }));
+  }
+
+  public resolveConflict(id: string, resolution: 'accepted_incoming' | 'kept_local' | 'custom_merge'): void {
+    const stmt = this.db.prepare(`
+      UPDATE conflicts
+      SET resolved = 1, resolution = ?
+      WHERE id = ?
+    `);
+    stmt.run(resolution, id);
   }
 
   public close(): void {

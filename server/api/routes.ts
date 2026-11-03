@@ -11,8 +11,10 @@ import {
   NotFoundError,
 } from "../core/coordinator.ts";
 import type { TaskStatus } from "../../contracts/task.ts";
+import type { SyncEngine } from "../sync/syncEngine.ts";
+import type { SyncEvent } from "../../contracts/sync.ts";
 
-export function createApiRouter(coordinator: CoordinatorService): Router {
+export function createApiRouter(coordinator: CoordinatorService, syncEngine?: SyncEngine): Router {
   const router = Router();
 
   // --- Health Check ---
@@ -52,6 +54,19 @@ export function createApiRouter(coordinator: CoordinatorService): Router {
       const taskId = String(req.params.id);
       const task = coordinator.getTask(taskId);
       res.json(task);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get("/tasks/:id/patch", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const taskId = String(req.params.id);
+      const patch = coordinator.getPatchByTaskId(taskId);
+      if (!patch) {
+        throw new NotFoundError(`No patch found for task: ${taskId}`);
+      }
+      res.json(patch);
     } catch (err) {
       next(err);
     }
@@ -192,6 +207,102 @@ export function createApiRouter(coordinator: CoordinatorService): Router {
       const { reviewerId, reason } = req.body;
       const patch = coordinator.rejectPatch(patchId, reviewerId, reason);
       res.json(patch);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // --- Synchronization Endpoints ---
+
+  router.get("/sync/status", (_req: Request, res: Response) => {
+    if (!syncEngine) {
+      res.json({ enabled: false, message: "Sync engine not attached" });
+      return;
+    }
+    const pendingOutbox = syncEngine.getPendingOutbox();
+    const conflicts = syncEngine.getConflicts(false);
+    res.json({
+      enabled: true,
+      deviceId: syncEngine.getDeviceId(),
+      isOnline: syncEngine.getOnlineStatus(),
+      pendingOutboxCount: pendingOutbox.length,
+      unresolvedConflictsCount: conflicts.length,
+    });
+  });
+
+  router.post("/sync/toggle-online", (req: Request, res: Response) => {
+    if (!syncEngine) {
+      res.status(400).json({ error: "Sync engine not attached" });
+      return;
+    }
+    const online = req.body.online === undefined ? true : Boolean(req.body.online);
+    syncEngine.setOnlineStatus(online);
+    res.json({
+      status: "ok",
+      isOnline: syncEngine.getOnlineStatus(),
+    });
+  });
+
+  router.get("/sync/outbox", (_req: Request, res: Response) => {
+    if (!syncEngine) {
+      res.json([]);
+      return;
+    }
+    res.json(syncEngine.getPendingOutbox());
+  });
+
+  router.post("/sync/flush", async (_req: Request, res: Response, next: NextFunction) => {
+    if (!syncEngine) {
+      res.status(400).json({ error: "Sync engine not attached" });
+      return;
+    }
+    try {
+      const result = await syncEngine.flushOutbox();
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/sync/events", (req: Request, res: Response, next: NextFunction) => {
+    if (!syncEngine) {
+      res.status(400).json({ error: "Sync engine not attached" });
+      return;
+    }
+    try {
+      const event = req.body as SyncEvent;
+      if (!event.eventId || !event.deviceId || !event.type) {
+        throw new ValidationError("eventId, deviceId, and type are required for sync events");
+      }
+      const result = syncEngine.ingestIncomingEvent(event);
+      res.status(result.status === "conflict" ? 409 : 200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get("/sync/conflicts", (req: Request, res: Response) => {
+    if (!syncEngine) {
+      res.json([]);
+      return;
+    }
+    const resolvedFilter = req.query.resolved !== undefined ? req.query.resolved === "true" : undefined;
+    res.json(syncEngine.getConflicts(resolvedFilter));
+  });
+
+  router.post("/sync/conflicts/:id/resolve", (req: Request, res: Response, next: NextFunction) => {
+    if (!syncEngine) {
+      res.status(400).json({ error: "Sync engine not attached" });
+      return;
+    }
+    try {
+      const conflictId = String(req.params.id);
+      const { resolution, customPayload } = req.body;
+      if (!resolution) {
+        throw new ValidationError("resolution is required");
+      }
+      syncEngine.resolveConflict(conflictId, resolution, customPayload);
+      res.json({ status: "ok", conflictId, resolution });
     } catch (err) {
       next(err);
     }
