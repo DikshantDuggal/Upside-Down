@@ -71,6 +71,10 @@ export class CoordinatorService {
     return this.subscribers.size;
   }
 
+  public recordExternalEvent(event: ActivityEvent): void {
+    this.publishEvent(event);
+  }
+
   private publishEvent(event: ActivityEvent): void {
     this.db.saveEvent(event);
     for (const callback of this.subscribers) {
@@ -195,10 +199,6 @@ export class CoordinatorService {
     return this.db.listEvents(taskId, since, limit);
   }
 
-  public recordExternalEvent(event: ActivityEvent): void {
-    this.publishEvent(event);
-  }
-
   // --- Agent Registry ---
 
   public registerAgent(agent: AgentInfo): void {
@@ -282,6 +282,10 @@ export class CoordinatorService {
       throw new NotFoundError(`Patch not found: ${id}`);
     }
     return patch;
+  }
+
+  public getPatchByTaskId(taskId: string): PatchRecord | null {
+    return this.db.getPatchByTaskId(taskId);
   }
 
   public approvePatch(id: string, reviewerId?: string): PatchRecord {

@@ -146,9 +146,6 @@ export class CoordinatorDatabase {
     }
   }
 
-  /**
-   * Atomic revision-guarded update. Returns null if baseRevision does not match current revision.
-   */
   public updateTaskWithRevision(
     id: string,
     targetStatus: TaskStatus,
@@ -314,6 +311,21 @@ export class CoordinatorDatabase {
       WHERE id = ?
     `);
     const row = stmt.get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.mapPatch(row);
+  }
+
+  public getPatchByTaskId(taskId: string): PatchRecord | null {
+    const stmt = this.db.prepare(`
+      SELECT id, task_id as taskId, run_id as runId, status, patch_path as patchPath,
+             diff_content as diffContent, test_output as testOutput, created_at as createdAt,
+             reviewed_at as reviewedAt, reviewer_id as reviewerId, rejection_reason as rejectionReason
+      FROM patches
+      WHERE task_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    const row = stmt.get(taskId) as Record<string, unknown> | undefined;
     if (!row) return null;
     return this.mapPatch(row);
   }

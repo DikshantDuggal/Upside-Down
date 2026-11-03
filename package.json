@@ -7,7 +7,10 @@
   "scripts": {
     "start": "node --experimental-strip-types server/index.ts",
     "dev": "node --experimental-strip-types --watch server/index.ts",
-    "test": "node --experimental-strip-types server/tests/coordinator.test.ts",
+    "test": "node --experimental-strip-types server/tests/coordinator.test.ts && node --experimental-strip-types server/tests/agentEngine.test.ts",
+    "test:coordinator": "node --experimental-strip-types server/tests/coordinator.test.ts",
+    "test:agent": "node --experimental-strip-types server/tests/agentEngine.test.ts",
+    "typecheck": "tsc --noEmit",
     "build": "tsc"
   },
   "keywords": [
