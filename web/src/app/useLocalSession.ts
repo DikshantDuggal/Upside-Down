@@ -42,6 +42,39 @@ export function useLocalSession() {
       if (signal?.aborted) return;
       configureBrowserSession({ canReview: false });
       if (err instanceof ApiError && err.status === 401) {
+        // In local development outside tests, attempt auto-pairing with local session key
+        if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
+          try {
+            const keyRes = await fetch("/dev-pairing-key", { signal });
+            if (keyRes.ok) {
+              const keyData = await keyRes.json();
+              if (
+                typeof keyData.pairingKey === "string" &&
+                keyData.pairingKey.length >= 32
+              ) {
+                const pairResult = await request(
+                  "/local/session",
+                  sessionSchema,
+                  {
+                    body: { pairingKey: keyData.pairingKey },
+                    sessionBootstrap: true,
+                    signal,
+                  },
+                );
+                if (!signal?.aborted) {
+                  configureBrowserSession({
+                    csrfToken: pairResult.value.csrfToken,
+                    canReview: false,
+                  });
+                  setStatus("paired");
+                  return;
+                }
+              }
+            }
+          } catch {
+            // fallthrough to manual pairing required
+          }
+        }
         setStatus("required");
       } else {
         setStatus(
@@ -108,6 +141,14 @@ export function useLocalSession() {
     setStatus("paired");
     setError("");
   }, []);
+  const pairDev = useCallback(async () => {
+    const keyRes = await fetch("/dev-pairing-key");
+    if (!keyRes.ok) throw new Error("Local dev pairing key not available");
+    const keyData = await keyRes.json();
+    if (typeof keyData.pairingKey !== "string")
+      throw new Error("Invalid pairing key payload");
+    await pair(keyData.pairingKey);
+  }, [pair]);
   useEffect(() => {
     const controller = new AbortController();
     void restore(controller.signal);
@@ -128,5 +169,6 @@ export function useLocalSession() {
     error,
     restore,
     pair,
+    pairDev,
   };
 }

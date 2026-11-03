@@ -518,6 +518,17 @@ export function App() {
               <button className="inline-link" onClick={() => setPairing(true)}>
                 Pair browser
               </button>
+              {typeof localSession.pairDev === "function" && (
+                <>
+                  {" · "}
+                  <button
+                    className="inline-link"
+                    onClick={() => void localSession.pairDev?.()}
+                  >
+                    Auto-pair (1-click)
+                  </button>
+                </>
+              )}
             </Notice>
           )}
           {data.error && <Notice danger>{data.error}</Notice>}

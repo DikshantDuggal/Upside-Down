@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { KeyRound, Link2 } from "lucide-react";
+import { KeyRound, Link2, Sparkles } from "lucide-react";
 import { errorMessage } from "../api/client";
 import type { useLocalSession } from "../app/useLocalSession";
 import { Badge, Modal, Notice } from "../components/ui";
@@ -46,6 +46,15 @@ export function LocalSessionCard({
           >
             Check session
           </button>
+          {typeof session.pairDev === "function" && (
+            <button
+              className="button secondary"
+              onClick={() => void session.pairDev()}
+            >
+              <Sparkles size={14} />
+              Auto-pair (Dev)
+            </button>
+          )}
           <button className="button primary" onClick={open}>
             <KeyRound size={15} />
             Pair browser
@@ -81,6 +90,28 @@ export function PairBrowser({
       setBusy(false);
     }
   }
+
+  async function handleAutoPair() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/dev-pairing-key");
+      if (!res.ok) throw new Error("Local dev key not available from dev server");
+      const data = await res.json();
+      if (typeof data.pairingKey === "string" && data.pairingKey.length >= 32) {
+        await pair(data.pairingKey);
+        close();
+      } else {
+        throw new Error("Invalid pairing key received");
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Modal title="Pair this browser" onClose={close}>
       <form className="form-stack" onSubmit={submit}>
@@ -116,6 +147,15 @@ export function PairBrowser({
         <div className="form-actions">
           <button type="button" className="button secondary" onClick={close}>
             Cancel
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={busy}
+            onClick={handleAutoPair}
+          >
+            <Sparkles size={14} />
+            Auto-Pair (Local Dev)
           </button>
           <button
             className="button primary"
