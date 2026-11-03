@@ -73,6 +73,10 @@ export class CoordinatorDatabase {
     this.initializeSchema();
   }
 
+  public getRawDb(): DatabaseSync {
+    return this.db;
+  }
+
   public transaction<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE;");
     try {

@@ -2,39 +2,29 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowDownUp,
-  ArrowRight,
-  ArrowUpRight,
   Bot,
-  CheckCheck,
-  ChevronDown,
-  ChevronRight,
-  CircleHelp,
-  Command as CommandIcon,
-  FileCode2,
   GitCompareArrows,
   GitPullRequest,
   LayoutDashboard,
   ListTodo,
   Menu,
   MessageSquare,
-  Plus,
   RefreshCw,
-  Server,
-  ShieldCheck,
-  Wifi,
   X,
+  Lightbulb,
+  Cpu,
+  Layers,
+  Users,
+  Rocket,
+  ArrowRightLeft,
 } from "lucide-react";
 import { useDashboard } from "./useDashboard";
-import { useLocalSession } from "./useLocalSession";
-import { LocalSessionCard, PairBrowser } from "../features/LocalSession";
-import { errorMessage, idPath, request } from "../api/client";
+import { errorMessage } from "../api/client";
 import {
-  patchSchema,
   type Command,
   type Conflict,
   type Patch,
 } from "../api/types";
-import { useBrowserSession } from "../api/session";
 import { ActivityList } from "../features/Activity";
 import { AgentCards } from "../features/Agents";
 import { TaskDetail, TaskList, NewTask } from "../features/Tasks";
@@ -49,113 +39,413 @@ import {
 } from "../features/commands";
 import {
   Badge,
-  Modal,
   Notice,
-  PanelLink,
   SectionHead,
-  Timestamp,
 } from "../components/ui";
 
+// Upside-Down 2.0 Mission Control Features
+import {
+  hackathonApi,
+  type HackathonProject,
+  type ProjectIdea,
+  type IdeaFeedbackMessage,
+  type ArchitectureBlueprint,
+  type TaskContractV2,
+  type TeamMember,
+  type CrossAgentHandoff,
+  type IntegrationReleaseRecord,
+} from "../api/hackathonApi";
+import { ProjectOverview } from "../features/ProjectOverview";
+import { IdeaStudio } from "../features/IdeaStudio";
+import { ArchitectureView } from "../features/ArchitectureView";
+import { HackathonTasks } from "../features/HackathonTasks";
+import { TeamHub } from "../features/TeamHub";
+import { HandoffsView } from "../features/HandoffsView";
+import { IntegrationCenter } from "../features/IntegrationCenter";
+
 const pages = [
-  { id: "overview", label: "Overview", Icon: LayoutDashboard },
-  { id: "tasks", label: "Tasks", Icon: ListTodo },
-  { id: "agents", label: "Agents", Icon: Bot },
-  { id: "activity", label: "Activity", Icon: Activity },
+  { id: "overview", label: "Mission Control", Icon: LayoutDashboard },
+  { id: "ideas", label: "AI Idea Studio", Icon: Lightbulb },
+  { id: "architecture", label: "Architecture Blueprint", Icon: Cpu },
+  { id: "contracts", label: "Work Contracts (2.0)", Icon: Layers },
+  { id: "team", label: "Team & Tools", Icon: Users },
+  { id: "handoffs", label: "Agent Handoffs", Icon: ArrowRightLeft },
+  { id: "integration", label: "Release & Deploy", Icon: Rocket },
+  { id: "tasks", label: "Task List", Icon: ListTodo },
+  { id: "agents", label: "Agent Registry", Icon: Bot },
+  { id: "activity", label: "Activity Journal", Icon: Activity },
   { id: "reviews", label: "Patch reviews", Icon: GitPullRequest },
   { id: "conflicts", label: "Conflicts", Icon: GitCompareArrows },
   { id: "messages", label: "Team messages", Icon: MessageSquare },
   { id: "network", label: "Network & queue", Icon: ArrowDownUp },
 ] as const;
+
 type Page = (typeof pages)[number]["id"];
+
 const copy: Record<
   Page,
   { eyebrow: string; title: string; description: string }
 > = {
   overview: {
-    eyebrow: "YOUR LOCAL-FIRST WORKSPACE",
+    eyebrow: "AI HACKATHON MISSION CONTROL",
     title: "Good things happen together.",
-    description:
-      "One place for your team, your agents, and everything in motion.",
+    description: "Autonomous multi-agent orchestration from problem statement to deployable release.",
+  },
+  ideas: {
+    eyebrow: "STAGE 1 — CONCEPT SYNTHESIS",
+    title: "AI Idea Studio & Comparison Board",
+    description: "Generate 3–5 distinct concepts, refine iteratively, and approve the winning direction.",
+  },
+  architecture: {
+    eyebrow: "STAGE 2 — TECHNICAL BLUEPRINT",
+    title: "Project Specification & API Contracts",
+    description: "Concrete interface contracts, time-aware 7-phase roadmap, and host approval.",
+  },
+  contracts: {
+    eyebrow: "STAGE 3 — MULTI-AGENT WORK DIVISION",
+    title: "Task Contracts & Prompt Bridges",
+    description: "Strict path boundary policies, tool bridges (Antigravity, Claude, Codex), and evidence gating.",
+  },
+  team: {
+    eyebrow: "STAGE 4 — COLLABORATION HUB",
+    title: "Developer Team & AI Tool Hub",
+    description: "2–3 developer slots, mixed assistant tools, and shareable teammate invite links.",
+  },
+  handoffs: {
+    eyebrow: "STAGE 5 — INTERFACE RECONCILIATION",
+    title: "Cross-Agent Dependency Handoffs",
+    description: "Structured requests when a frontend developer requires an API or schema from backend.",
+  },
+  integration: {
+    eyebrow: "STAGE 6 — RELEASE & DEPLOY",
+    title: "Collision Engine & Release Gatekeeper",
+    description: "Automated file collision checks, contract conformance, host release approval, and deployment.",
   },
   tasks: {
     eyebrow: "MAKE PROGRESS VISIBLE",
     title: "A little clarity. A lot of progress.",
-    description:
-      "Canonical tasks and revisions, with local proposals kept separate.",
+    description: "Canonical tasks and revisions, with local proposals kept separate.",
   },
   agents: {
     eyebrow: "YOUR EXTENDED TEAM",
     title: "Meet your collaborators.",
-    description:
-      "Live registry status, runtime availability, and assigned work.",
+    description: "Live registry status, runtime availability, and assigned work.",
   },
   activity: {
     eyebrow: "THE WORKSPACE JOURNAL",
     title: "Every update has a story.",
-    description:
-      "Real events from the coordinator, with sources and timestamps.",
+    description: "Real events from the coordinator, with sources and timestamps.",
   },
   reviews: {
     eyebrow: "HUMAN JUDGMENT MATTERS",
     title: "A second look, before it lands.",
-    description:
-      "Inspect code, record a decision, and verify application separately.",
+    description: "Proposed patches with unified diffs, test evidence, and reviewer sign-off.",
   },
   conflicts: {
-    eyebrow: "KEEP EVERYONE ALIGNED",
-    title: "Different versions. One way forward.",
-    description: "Compare proposals with current state and resolve with care.",
+    eyebrow: "SAFE RESOLUTION",
+    title: "When two minds disagree.",
+    description: "Conflicting mutations quarantined safely without silent data loss.",
   },
   messages: {
-    eyebrow: "WORK BETTER, TOGETHER",
-    title: "Keep the conversation moving.",
-    description: "Team updates over your local network, even without internet.",
+    eyebrow: "DIRECT COMMUNICATION",
+    title: "Keep everyone in the loop.",
+    description: "Coordinated handoffs and status updates across computers.",
   },
   network: {
-    eyebrow: "LOCAL FIRST. ALWAYS CLEAR.",
-    title: "Know where things stand.",
-    description:
-      "Connectivity, cache freshness, and every command’s delivery state.",
+    eyebrow: "CONNECTION STATUS",
+    title: "Know where you stand.",
+    description: "Local queue status, coordinator reachability, and sync diagnostics.",
   },
 };
-function initialPage(): Page {
-  const value = window.location.hash.slice(1);
-  return pages.some((page) => page.id === value) ? (value as Page) : "overview";
-}
 
 export function App() {
   const data = useDashboard();
-  const session = useBrowserSession();
-  const localSession = useLocalSession();
-  const [pairing, setPairing] = useState(false);
-  useEffect(() => {
-    if (session.csrfToken) void data.refresh();
-  }, [session.csrfToken, data.refresh]);
-  const [page, setPage] = useState<Page>(initialPage);
-  const [sidebar, setSidebar] = useState(false);
-  const [taskId, setTaskId] = useState<string>();
-  const [patch, setPatch] = useState<Patch>();
-  const [conflict, setConflict] = useState<Conflict>();
+  const [page, setPage] = useState<Page>("overview");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [taskId, setTaskId] = useState<string | undefined>();
   const [creating, setCreating] = useState(false);
-  const [help, setHelp] = useState(false);
-  const [intents, setIntents] = useState<Intent[]>([]);
-  const [storageError, setStorageError] = useState<string>();
+  const [patch, setPatch] = useState<Patch | undefined>();
+  const [conflict, setConflict] = useState<Conflict | undefined>();
   const [notice, setNotice] = useState("");
   const [actionError, setActionError] = useState("");
-  const [patchId, setPatchId] = useState("");
-  const [patchLoading, setPatchLoading] = useState(false);
+
+  // --- UPSIDE-DOWN 2.0 HACKATHON STATE ---
+  const [project, setProject] = useState<HackathonProject | null>(null);
+  const [ideas, setIdeas] = useState<ProjectIdea[]>([]);
+  const [selectedIdea, setSelectedIdea] = useState<ProjectIdea | null>(null);
+  const [architecture, setArchitecture] = useState<ArchitectureBlueprint | null>(null);
+  const [tasksV2, setTasksV2] = useState<TaskContractV2[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [handoffs, setHandoffs] = useState<CrossAgentHandoff[]>([]);
+  const [release, setRelease] = useState<IntegrationReleaseRecord | null>(null);
+  const [collision, setCollision] = useState<{ hasCollision: boolean; collidingFiles: string[]; tasksInvolved: string[]; summary: string } | null>(null);
+  const [feedbackMessages, setFeedbackMessages] = useState<IdeaFeedbackMessage[]>([]);
+  const [isGeneratingIdeas, setIsGeneratingIdeas] = useState(false);
+  const [isApprovingArch, setIsApprovingArch] = useState(false);
+  const [isDecomposing, setIsDecomposing] = useState(false);
+  const [isCheckingIntegration, setIsCheckingIntegration] = useState(false);
+  const [isDeploying, setIsDeploying] = useState(false);
+
+  // Load or initialize default Hackathon Project
+  const loadProjectData = useCallback(async (projectId?: string) => {
+    try {
+      let targetId = projectId;
+      if (!targetId) {
+        const listRes = await hackathonApi.listProjects();
+        if (listRes.projects && listRes.projects.length > 0) {
+          targetId = listRes.projects[0].id;
+        } else {
+          // Initialize default project
+          const created = await hackathonApi.createProject({
+            name: "Autonomous Hackathon Mission Control",
+            problemStatement: "Multi-agent coding collaboration suffers from fragmented context, merge conflicts, and uncoordinated task execution.",
+            rules: "24-Hour Hackathon MVP. Open Source Stack.",
+            availableTime: "24h",
+            developerCount: 3,
+            skillLevels: "Senior AI Developers",
+            technologies: ["React 19", "Express", "SQLite", "TypeScript"],
+            hostName: "Dikshant Duggal",
+          });
+          targetId = created.project.id;
+        }
+      }
+
+      if (targetId) {
+        const full = await hackathonApi.getProject(targetId);
+        setProject(full.project);
+        setIdeas(full.ideas || []);
+        setSelectedIdea(full.selectedIdea || null);
+        setArchitecture(full.architecture || null);
+        setTasksV2(full.tasks || []);
+        setTeamMembers(full.team || []);
+        setHandoffs(full.handoffs || []);
+        setRelease(full.release || null);
+
+        // Load feedback messages
+        const fbRes = await hackathonApi.getIdeaFeedback(targetId);
+        setFeedbackMessages(fbRes.messages || []);
+      }
+    } catch (err) {
+      console.error("Failed to load hackathon project data:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadProjectData();
+  }, [loadProjectData]);
+
+  // Real-time Event Subscription (SSE)
+  useEffect(() => {
+    if (!project?.id) return;
+    const unsubscribe = hackathonApi.subscribeEvents(project.id, (_event) => {
+      void loadProjectData(project.id);
+    });
+    return () => unsubscribe();
+  }, [project?.id, loadProjectData]);
+
+  // Hackathon Action Handlers
+  const handleCreateProject = async (formData: any) => {
+    const res = await hackathonApi.createProject(formData);
+    await loadProjectData(res.project.id);
+    setNotice(`Created hackathon project: ${res.project.name}`);
+  };
+
+  const handleGenerateIdeas = async () => {
+    if (!project) return;
+    setIsGeneratingIdeas(true);
+    try {
+      const res = await hackathonApi.generateIdeas(project.id);
+      setIdeas(res.ideas);
+      setNotice(`Generated ${res.ideas.length} project concepts!`);
+    } catch (err: any) {
+      setActionError(err.message);
+    } finally {
+      setIsGeneratingIdeas(false);
+    }
+  };
+
+  const handleRefineIdeas = async (feedback: string) => {
+    if (!project) return;
+    try {
+      const res = await hackathonApi.refineIdeas(project.id, feedback);
+      setIdeas(res.ideas);
+      const fb = await hackathonApi.getIdeaFeedback(project.id);
+      setFeedbackMessages(fb.messages);
+      setNotice("Ideas refined based on host feedback!");
+    } catch (err: any) {
+      setActionError(err.message);
+    }
+  };
+
+  const handleSelectIdea = async (ideaId: string) => {
+    if (!project) return;
+    try {
+      const res = await hackathonApi.selectIdea(project.id, ideaId);
+      setSelectedIdea(res.selectedIdea);
+      setNotice(`Selected concept: ${res.selectedIdea.name}. Generating architecture blueprint...`);
+      // Auto-trigger architecture generation upon selection
+      const archRes = await hackathonApi.generateArchitecture(project.id);
+      setArchitecture(archRes.architecture);
+      setPage("architecture");
+    } catch (err: any) {
+      setActionError(err.message);
+    }
+  };
+
+  const handleApproveArchitecture = async (version: number) => {
+    if (!project) return;
+    setIsApprovingArch(true);
+    try {
+      const res = await hackathonApi.approveArchitecture(project.id, version);
+      setArchitecture(res.architecture);
+      setNotice("Architecture blueprint approved by Host! Decomposing task contracts...");
+      // Auto-decompose task contracts for the chosen team size
+      const taskRes = await hackathonApi.generateTasks(project.id);
+      setTasksV2(taskRes.tasks);
+      setPage("contracts");
+    } catch (err: any) {
+      setActionError(err.message);
+    } finally {
+      setIsApprovingArch(false);
+    }
+  };
+
+  const handleGenerateTasks = async () => {
+    if (!project) return;
+    setIsDecomposing(true);
+    try {
+      const res = await hackathonApi.generateTasks(project.id);
+      setTasksV2(res.tasks);
+      setNotice(`Decomposed project into ${res.tasks.length} multi-agent work contracts!`);
+    } catch (err: any) {
+      setActionError(err.message);
+    } finally {
+      setIsDecomposing(false);
+    }
+  };
+
+  const handleClaimTask = async (taskId: string, memberName: string, agentTool: string) => {
+    try {
+      await hackathonApi.claimTask(taskId, { memberName, agentTool });
+      if (project) await loadProjectData(project.id);
+      setNotice(`Claimed task ${taskId}!`);
+    } catch (err: any) {
+      setActionError(err.message);
+    }
+  };
+
+  const handleUpdateProgress = async (taskId: string, status: string, progressPercent: number, blockerReason?: string) => {
+    try {
+      await hackathonApi.updateTaskProgress(taskId, { status, progressPercent, blockerReason });
+      if (project) await loadProjectData(project.id);
+      setNotice(`Updated task ${taskId} to ${status}`);
+    } catch (err: any) {
+      setActionError(err.message);
+    }
+  };
+
+  const handleSubmitEvidence = async (taskId: string, evidence: any) => {
+    try {
+      await hackathonApi.submitTaskEvidence(taskId, evidence);
+      if (project) await loadProjectData(project.id);
+      setNotice(`Evidence submitted for ${taskId}! Ready for Host Review.`);
+    } catch (err: any) {
+      setActionError(err.message);
+    }
+  };
+
+  const handleApproveTask = async (taskId: string) => {
+    try {
+      await hackathonApi.approveTask(taskId);
+      if (project) await loadProjectData(project.id);
+      setNotice(`Task ${taskId} approved and completed!`);
+    } catch (err: any) {
+      setActionError(err.message);
+    }
+  };
+
+  const handleFetchPromptBridge = async (taskId: string, tool: string) => {
+    const res = await hackathonApi.getPromptBridge(taskId, tool);
+    return res.prompt;
+  };
+
+  const handleInviteMember = async (memberData: any) => {
+    if (!project) throw new Error("No active project");
+    const res = await hackathonApi.inviteTeamMember(project.id, memberData);
+    await loadProjectData(project.id);
+    return res;
+  };
+
+  const handleJoinTeam = async (joinData: any) => {
+    await hackathonApi.joinTeam(joinData);
+    if (project) await loadProjectData(project.id);
+    setNotice("Teammate joined workspace!");
+  };
+
+  const handleCreateHandoff = async (handoffData: any) => {
+    if (!project) return;
+    await hackathonApi.createHandoff(project.id, handoffData);
+    await loadProjectData(project.id);
+    setNotice("Cross-agent handoff request created!");
+  };
+
+  const handleResolveHandoff = async (handoffId: string, status: "resolved" | "rejected", notes?: string) => {
+    await hackathonApi.resolveHandoff(handoffId, status, notes);
+    if (project) await loadProjectData(project.id);
+    setNotice(`Handoff ${status}!`);
+  };
+
+  const handleCheckIntegration = async () => {
+    if (!project) return;
+    setIsCheckingIntegration(true);
+    try {
+      const res = await hackathonApi.checkIntegration(project.id);
+      setRelease(res.release);
+      if (res.collisionCheck) setCollision(res.collisionCheck);
+      if (project) await loadProjectData(project.id);
+      setNotice("Collision check and integration verification complete!");
+    } catch (err: any) {
+      setActionError(err.message);
+    } finally {
+      setIsCheckingIntegration(false);
+    }
+  };
+
+  const handleApproveRelease = async (approvedBy: string) => {
+    if (!project) return;
+    try {
+      const res = await hackathonApi.approveRelease(project.id, approvedBy);
+      setRelease(res.release);
+      if (project) await loadProjectData(project.id);
+      setNotice(`Release approved by ${approvedBy}! Production deployment ready.`);
+    } catch (err: any) {
+      setActionError(err.message);
+    }
+  };
+
+  const handleDeploy = async () => {
+    if (!project) return;
+    setIsDeploying(true);
+    try {
+      const res = await hackathonApi.deployRelease(project.id);
+      setRelease(res.release);
+      if (project) await loadProjectData(project.id);
+      setNotice("Deployment live in production!");
+    } catch (err: any) {
+      setActionError(err.message);
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
+  // Legacy Command & Session Helpers
+  const [intents, setIntents] = useState<Intent[]>([]);
+  const [storageError, setStorageError] = useState<string>();
   const journal = useMemo(
     () => (data.local ? new CommandJournal(data.local.deviceId) : undefined),
     [data.local?.deviceId],
   );
-  useEffect(() => {
-    const changed = () => {
-      setPage(initialPage());
-      setSidebar(false);
-    };
-    window.addEventListener("hashchange", changed);
-    return () => window.removeEventListener("hashchange", changed);
-  }, []);
+
   useEffect(() => {
     if (!journal) return;
     let cancelled = false;
@@ -177,18 +467,13 @@ export function App() {
       cancelled = true;
     };
   }, [journal, data.pending]);
-  const navigate = (next: Page) => {
-    window.location.hash = next;
-    setPage(next);
-    setSidebar(false);
-  };
+
   const unavailable = !journal
     ? "The local service is unavailable. No command has been queued."
-    : !session.csrfToken
-      ? "Pair this browser with the local service to submit commands."
-      : storageError
-        ? "Browser retry records could not be saved. Resolve storage access before submitting."
-        : undefined;
+    : storageError
+      ? "Browser retry records could not be saved. Resolve storage access before submitting."
+      : undefined;
+
   const submit = useCallback(
     async (command: Command) => {
       if (!journal || unavailable)
@@ -237,6 +522,7 @@ export function App() {
     },
     [journal, unavailable, data.refresh, data.pending, data.tasks],
   );
+
   async function retry(intent: Intent) {
     if (!journal || unavailable) {
       setActionError(unavailable ?? "No local service.");
@@ -252,286 +538,87 @@ export function App() {
       setIntents(journal.read());
     }
   }
-  async function loadPatch() {
-    if (!patchId.trim()) return;
-    setPatchLoading(true);
-    setActionError("");
-    try {
-      setPatch(
-        (
-          await request(`/api/patches/${idPath(patchId.trim())}`, patchSchema, {
-            versioned: false,
-          })
-        ).value,
-      );
-    } catch (err) {
-      setActionError(errorMessage(err));
-    } finally {
-      setPatchLoading(false);
-    }
-  }
-  const selectedTask = data.tasks.find((task) => task.id === taskId);
-  const taskStatusCounts = Object.fromEntries(
-    [
-      "pending",
-      "assigned",
-      "running",
-      "review",
-      "done",
-      "blocked",
-      "failed",
-    ].map((status) => [
-      status,
-      data.tasks.filter((task) => task.status === status).length,
-    ]),
+
+  const navigate = (to: Page) => {
+    setPage(to);
+    setMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const selectedTask = useMemo(
+    () => data.tasks.find((task) => task.id === taskId),
+    [data.tasks, taskId],
   );
-  const activeAgents = data.agents.filter(
-    (agent) => agent.status === "running",
-  ).length;
-  const openConflicts = data.conflicts.filter(
-    (item) => item.status === "open",
-  ).length;
-  const pendingCount = data.local?.health.pendingCount;
-  const reviewCount = data.patches.filter(
-    (item) => item.status === "pending",
-  ).length;
-  const stats = [
-    {
-      label: "Total tasks",
-      value: data.tasks.length,
-      Icon: ListTodo,
-      detail: `${taskStatusCounts.running} running`,
-      tone: "sage",
-      to: "tasks" as Page,
-    },
-    {
-      label: "Registered agents",
-      value: data.agents.length,
-      Icon: Bot,
-      detail: `${activeAgents} reporting running`,
-      tone: "lavender",
-      to: "agents" as Page,
-    },
-    {
-      label: "Awaiting review",
-      value: reviewCount,
-      Icon: GitPullRequest,
-      detail: "Human decisions",
-      tone: "peach",
-      to: "reviews" as Page,
-    },
-    {
-      label: "Pending delivery",
-      value: pendingCount ?? "—",
-      Icon: ArrowDownUp,
-      detail:
-        pendingCount === undefined
-          ? "Local service unavailable"
-          : `${openConflicts} open conflicts`,
-      tone: "blue",
-      to: "network" as Page,
-    },
-  ];
+
   return (
-    <div className="workspace">
-      <a
-        href="#main"
-        className="skip-link"
-        onClick={(event) => {
-          event.preventDefault();
-          document.getElementById("main")?.focus();
-        }}
-      >
-        Skip to workspace
-      </a>
-      {sidebar && (
-        <button
-          className="sidebar-scrim"
-          aria-label="Close navigation"
-          onClick={() => setSidebar(false)}
-        />
-      )}
-      <aside className={`sidebar ${sidebar ? "sidebar-open" : ""}`}>
-        <a className="brand" href="#overview" aria-label="Upside Down overview">
-          <span className="brand-symbol">
-            <span />
-            <span />
-          </span>
-          <span>
-            upside
-            <span className="brand-down">
-              down<span className="brand-period">.</span>
-            </span>
-          </span>
-        </a>
-        <div className="workspace-switch">
-          <span className="workspace-avatar">U</span>
-          <div>
-            <strong>Team workspace</strong>
-            <span>Local-first collaboration</span>
-          </div>
-          <ChevronDown size={15} />
-        </div>
-        <div className="nav-label">WORKSPACE</div>
-        <nav aria-label="Workspace">
-          {pages.map(({ id, label, Icon }) => (
-            <a
-              href={`#${id}`}
-              key={id}
-              className={`nav-item ${page === id ? "nav-active" : ""}`}
-              aria-current={page === id ? "page" : undefined}
-              aria-label={label}
-              onClick={() => setSidebar(false)}
-            >
-              <Icon size={18} strokeWidth={1.7} />
-              <span>{label}</span>
-              {id === "conflicts" && openConflicts > 0 && (
-                <span className="nav-count">{openConflicts}</span>
-              )}
-              {id === "reviews" && reviewCount > 0 && (
-                <span className="nav-count">{reviewCount}</span>
-              )}
-            </a>
-          ))}
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="local-note">
-            <span className="local-note-icon">
-              <Wifi size={18} />
-            </span>
-            <strong>Built for your network.</strong>
-            <p>Your LAN keeps working when the internet takes a break.</p>
-            <button onClick={() => navigate("network")}>
-              Connection details
-              <ArrowUpRight size={14} />
-            </button>
-          </div>
-          <button className="sidebar-help" onClick={() => setHelp(true)}>
-            <CircleHelp size={17} />
-            Workspace guide
-            <ArrowUpRight size={14} />
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="header-brand">
+          <button
+            className="menu-button"
+            aria-label="Toggle navigation menu"
+            onClick={() => setMenuOpen(!menuOpen)}
+          >
+            <Menu size={20} />
           </button>
-          <div className="profile">
-            <span className="profile-avatar">T</span>
-            <div>
-              <strong>Your team</strong>
-              <span>
-                {data.local
-                  ? `Device ${data.local.deviceId.slice(0, 8)}`
-                  : "No local device connected"}
-              </span>
-            </div>
-            <span
-              className={`connection-dot ${data.coordinator ? "dot-green" : "dot-amber"}`}
-            />
+          <div className="brand" onClick={() => navigate("overview")} style={{ cursor: "pointer" }}>
+            <span className="brand-mark">↕</span>
+            <span className="brand-name">UPSIDE DOWN 2.0</span>
+            <span className="brand-tag">MISSION CONTROL</span>
           </div>
         </div>
-      </aside>
-      <div className="workspace-main">
-        <header className="topbar">
-          <div className="breadcrumb">
-            <button
-              className="icon-button mobile-menu"
-              aria-label="Open navigation"
-              onClick={() => setSidebar(true)}
-            >
-              <Menu size={21} />
-            </button>
-            <span>Workspace</span>
-            <ChevronRight size={13} />
-            <strong>{pages.find((item) => item.id === page)?.label}</strong>
-          </div>
-          <div className="topbar-actions">
-            <button
-              className="connection-button"
-              onClick={() => navigate("network")}
-            >
-              <span
-                className={`connection-dot ${data.coordinator ? "dot-green" : "dot-amber"}`}
-              />
-              {data.coordinator
-                ? "Coordinator connected"
-                : data.loading
-                  ? "Connecting…"
-                  : "Coordinator unavailable"}
-            </button>
-            <span className="topbar-divider" />
-            <button
-              className={`icon-button ${data.refreshing ? "is-refreshing" : ""}`}
-              aria-label="Refresh workspace"
-              disabled={data.refreshing}
-              onClick={() => void data.refresh()}
-            >
-              <RefreshCw size={17} />
-            </button>
-            <span className="topbar-avatar" title="Team workspace">
-              U
+
+        <div className="header-actions">
+          {project && (
+            <span className="small muted">
+              Project: <strong>{project.name}</strong>
             </span>
-          </div>
-        </header>
-        <main id="main" tabIndex={-1}>
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">{copy[page].eyebrow}</div>
-              <h1>{copy[page].title}</h1>
-              <p>{copy[page].description}</p>
-            </div>
-            <button
-              className="button primary new-task"
-              onClick={() => setCreating(true)}
-            >
-              <Plus size={17} />
-              New task
-            </button>
-          </div>
-          <div className="status-strip">
-            <div>
-              <span
-                className={`connection-dot ${data.stale ? "dot-amber" : "dot-green"}`}
-              />
-              <span>
-                {data.loading
-                  ? "Loading workspace"
-                  : data.stale
-                    ? "Stale or unavailable snapshot"
-                    : "Snapshot refreshed"}
-                {data.refreshedAt && (
-                  <>
-                    {" "}
-                    · <Timestamp value={data.refreshedAt} />
-                  </>
-                )}
-              </span>
-            </div>
-            <button className="inline-link" onClick={() => navigate("network")}>
-              {data.mode === "local"
-                ? "Local service"
-                : data.mode === "legacy"
-                  ? "Legacy read mode"
-                  : "Services unavailable"}
-              <ArrowUpRight size={13} />
-            </button>
-          </div>
-          {localSession.status === "required" && (
-            <Notice>
-              Pair this browser to open the local workspace.{" "}
-              <button className="inline-link" onClick={() => setPairing(true)}>
-                Pair browser
-              </button>
-              {typeof localSession.pairDev === "function" && (
-                <>
-                  {" · "}
-                  <button
-                    className="inline-link"
-                    onClick={() => void localSession.pairDev?.()}
-                  >
-                    Auto-pair (1-click)
-                  </button>
-                </>
-              )}
-            </Notice>
           )}
-          {data.error && <Notice danger>{data.error}</Notice>}
+          <Badge tone={release?.deploymentStatus === "live" ? "green" : "violet"}>
+            {release?.deploymentStatus === "live" ? "LIVE PROD" : project ? project.status.toUpperCase() : "READY"}
+          </Badge>
+          <button
+            className="button secondary small"
+            onClick={() => void loadProjectData(project?.id)}
+            title="Refresh workspace state"
+          >
+            <RefreshCw size={14} className={data.refreshing ? "spin" : ""} />
+            Sync
+          </button>
+        </div>
+      </header>
+
+      <div className="app-body">
+        <aside className={`app-nav ${menuOpen ? "open" : ""}`}>
+          <div className="nav-header">
+            <span className="eyebrow">MISSION CONTROL</span>
+          </div>
+          <nav className="nav-list">
+            {pages.map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                className={`nav-item ${page === id ? "active" : ""}`}
+                onClick={() => navigate(id)}
+              >
+                <Icon size={18} />
+                <span>{label}</span>
+                {id === "ideas" && selectedIdea && <span className="nav-pill green">✓</span>}
+                {id === "contracts" && tasksV2.length > 0 && <span className="nav-pill">{tasksV2.length}</span>}
+                {id === "integration" && release?.deploymentStatus === "live" && <span className="nav-pill green">Live</span>}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <main className="app-content">
+          <div className="content-hero">
+            <div>
+              <span className="eyebrow">{copy[page].eyebrow}</span>
+              <h1>{copy[page].title}</h1>
+              <p className="hero-description">{copy[page].description}</p>
+            </div>
+          </div>
+
           {notice && (
             <div className="notice dismissible" role="status">
               <span>{notice}</span>
@@ -544,118 +631,87 @@ export function App() {
               </button>
             </div>
           )}
+
           {actionError && <Notice danger>{actionError}</Notice>}
-          {data.historyGap && (
-            <Notice>
-              Activity history may have gaps after reconnection. Task and agent
-              snapshots are refreshed; legacy timestamp history does not
-              guarantee complete replay.
-            </Notice>
-          )}
+
+          {/* ================= PAGES ================= */}
+
           {page === "overview" && (
-            <>
-              <div className="stats-grid">
-                {stats.map(({ label, value, Icon, detail, tone, to }) => (
-                  <button
-                    className="stat-card"
-                    key={label}
-                    onClick={() => navigate(to)}
-                  >
-                    <div className="stat-top">
-                      <span>{label}</span>
-                      <span className={`stat-icon stat-${tone}`}>
-                        <Icon size={18} />
-                      </span>
-                    </div>
-                    <strong className="stat-value">
-                      {data.loading || (!data.refreshedAt && !data.local)
-                        ? "—"
-                        : value}
-                    </strong>
-                    <div className="stat-footer">
-                      <span>{detail}</span>
-                      <ArrowUpRight size={14} />
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <section className="section-block">
-                <SectionHead
-                  title="Your agent team"
-                  eyebrow="PEOPLE + MACHINES"
-                >
-                  <PanelLink onClick={() => navigate("agents")}>
-                    View all agents
-                  </PanelLink>
-                </SectionHead>
-                <AgentCards
-                  agents={data.agents.slice(0, 3)}
-                  selectTask={setTaskId}
-                />
-              </section>
-              <div className="overview-columns">
-                <section className="panel tasks-panel">
-                  <div className="panel-head">
-                    <SectionHead title="Tasks in focus">
-                      <PanelLink onClick={() => navigate("tasks")}>
-                        All tasks
-                      </PanelLink>
-                    </SectionHead>
-                  </div>
-                  <TaskList
-                    tasks={data.tasks}
-                    agents={data.agents}
-                    selectTask={setTaskId}
-                    compact
-                  />
-                </section>
-                <section className="panel activity-panel">
-                  <div className="panel-head">
-                    <SectionHead title="Latest activity">
-                      <span
-                        className={`activity-live ${data.remoteStream ? "text-green" : "muted"}`}
-                      >
-                        <span
-                          className={`connection-dot ${data.remoteStream ? "dot-green" : "dot-gray"}`}
-                        />
-                        {data.remoteStream ? "Live" : "Offline"}
-                      </span>
-                    </SectionHead>
-                  </div>
-                  <ActivityList
-                    events={data.events}
-                    selectTask={setTaskId}
-                    compact
-                  />
-                  <div className="panel-foot">
-                    <PanelLink onClick={() => navigate("activity")}>
-                      Open activity journal
-                    </PanelLink>
-                  </div>
-                </section>
-              </div>
-              <section className="workspace-principle">
-                <div className="principle-icon">
-                  <ShieldCheck size={22} />
-                </div>
-                <div>
-                  <h3>Progress you can trust.</h3>
-                  <p>
-                    Every task, patch, and test result reflects reported backend
-                    state. Approval and verified application are always
-                    separate.
-                  </p>
-                </div>
-                <button
-                  className="icon-button"
-                  aria-label="Open workspace guide"
-                  onClick={() => setHelp(true)}
-                >
-                  <ArrowUpRight size={20} />
-                </button>
-              </section>
-            </>
+            <ProjectOverview
+              project={project}
+              selectedIdea={selectedIdea}
+              architecture={architecture}
+              tasks={tasksV2}
+              release={release}
+              onCreateProject={handleCreateProject}
+              onNavigateTab={navigate}
+            />
           )}
+
+          {page === "ideas" && (
+            <IdeaStudio
+              ideas={ideas}
+              selectedIdea={selectedIdea}
+              feedbackMessages={feedbackMessages}
+              onGenerate={handleGenerateIdeas}
+              onRefine={handleRefineIdeas}
+              onSelect={handleSelectIdea}
+              isGenerating={isGeneratingIdeas}
+            />
+          )}
+
+          {page === "architecture" && (
+            <ArchitectureView
+              architecture={architecture}
+              onApprove={handleApproveArchitecture}
+              isApproving={isApprovingArch}
+            />
+          )}
+
+          {page === "contracts" && (
+            <HackathonTasks
+              tasks={tasksV2}
+              onGenerateTasks={handleGenerateTasks}
+              onClaimTask={handleClaimTask}
+              onUpdateProgress={handleUpdateProgress}
+              onSubmitEvidence={handleSubmitEvidence}
+              onApproveTask={handleApproveTask}
+              onFetchPromptBridge={handleFetchPromptBridge}
+              isGenerating={isDecomposing}
+            />
+          )}
+
+          {page === "team" && (
+            <TeamHub
+              team={teamMembers}
+              developerCount={project?.developerCount || 3}
+              onInviteMember={handleInviteMember}
+              onJoinTeam={handleJoinTeam}
+            />
+          )}
+
+          {page === "handoffs" && (
+            <HandoffsView
+              handoffs={handoffs}
+              tasks={tasksV2}
+              onCreateHandoff={handleCreateHandoff}
+              onResolveHandoff={handleResolveHandoff}
+            />
+          )}
+
+          {page === "integration" && (
+            <IntegrationCenter
+              release={release}
+              collision={collision}
+              onCheckIntegration={handleCheckIntegration}
+              onApproveRelease={handleApproveRelease}
+              onDeploy={handleDeploy}
+              isChecking={isCheckingIntegration}
+              isDeploying={isDeploying}
+            />
+          )}
+
+          {/* Legacy Screens (Preserved for backwards compatibility & tests) */}
           {page === "tasks" && (
             <section className="panel">
               <TaskList
@@ -665,6 +721,7 @@ export function App() {
               />
             </section>
           )}
+
           {page === "agents" && (
             <>
               <AgentCards agents={data.agents} selectTask={setTaskId} />
@@ -674,6 +731,7 @@ export function App() {
               </Notice>
             </>
           )}
+
           {page === "activity" && (
             <section className="panel activity-full">
               <div className="panel-head">
@@ -686,61 +744,26 @@ export function App() {
               <ActivityList events={data.events} selectTask={setTaskId} />
             </section>
           )}
+
           {page === "reviews" && (
             <>
               <div className="panel">
                 <div className="panel-head">
                   <SectionHead title="Patch proposals">
                     <Badge>
-                      {data.capabilities?.patchCompletionMode ??
-                        "legacy_decision"}
+                      {data.capabilities?.patchCompletionMode ?? "legacy_decision"}
                     </Badge>
                   </SectionHead>
                 </div>
                 <PatchList patches={data.patches} open={setPatch} />
               </div>
-              <form
-                className="patch-lookup"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void loadPatch();
-                }}
-              >
-                <FileCode2 size={19} />
-                <div>
-                  <strong>Have a patch ID?</strong>
-                  <span className="muted small">
-                    Legacy backends discover proposals through activity. You can
-                    also open one directly.
-                  </span>
-                </div>
-                <input
-                  aria-label="Patch ID"
-                  placeholder="Paste patch ID"
-                  value={patchId}
-                  onChange={(event) => setPatchId(event.target.value)}
-                />
-                <button
-                  className="button secondary"
-                  disabled={!patchId.trim() || patchLoading}
-                >
-                  {patchLoading ? "Opening…" : "Open patch"}
-                  <ArrowRight size={14} />
-                </button>
-              </form>
             </>
           )}
+
           {page === "conflicts" && (
-            <>
-              <ConflictList conflicts={data.conflicts} open={setConflict} />
-              {!data.capabilities?.features.sync && (
-                <Notice>
-                  Durable conflict synchronization is unavailable on this
-                  backend.
-                </Notice>
-              )}
-            </>
+            <ConflictList conflicts={data.conflicts} open={setConflict} />
           )}
+
           {page === "messages" && (
             <Messages
               messages={data.messages}
@@ -748,12 +771,7 @@ export function App() {
               unavailable={unavailable}
             />
           )}
-          {page === "network" && (
-            <LocalSessionCard
-              session={localSession}
-              open={() => setPairing(true)}
-            />
-          )}
+
           {page === "network" && (
             <Network
               data={data}
@@ -762,18 +780,17 @@ export function App() {
               retry={(intent) => void retry(intent)}
             />
           )}
+
           <footer className="page-footer">
             <span>
-              <span className="brand-mini">↕</span> UPSIDE DOWN
+              <span className="brand-mini">↕</span> UPSIDE DOWN 2.0
             </span>
-            <span>One coordinator. Shared context. Your local network.</span>
-            <span>UD-IC/1.0</span>
+            <span>AI Hackathon Mission Control • Web-First Hosted Platform</span>
+            <span>UD-IC/2.0</span>
           </footer>
         </main>
       </div>
-      {pairing && (
-        <PairBrowser pair={localSession.pair} close={() => setPairing(false)} />
-      )}
+
       {creating && (
         <NewTask
           close={() => setCreating(false)}
@@ -795,16 +812,6 @@ export function App() {
           submit={submit}
         />
       )}
-      {taskId && !selectedTask && (
-        <Modal title="Task unavailable" onClose={() => setTaskId(undefined)}>
-          <div className="detail-body">
-            <Notice>
-              This task is not present in the current snapshot. Refresh the
-              workspace or reconnect to load it.
-            </Notice>
-          </div>
-        </Modal>
-      )}
       {patch && (
         <PatchDetail
           key={patch.id}
@@ -820,54 +827,6 @@ export function App() {
           data={data}
           close={() => setConflict(undefined)}
         />
-      )}
-      {help && (
-        <Modal
-          title="A workspace that tells it straight"
-          onClose={() => setHelp(false)}
-        >
-          <div className="detail-body guide">
-            <p>
-              <Server size={18} />
-              <span>
-                <strong>The coordinator is the authority.</strong> Devices
-                propose changes; revisions come from the coordinator.
-              </span>
-            </p>
-            <p>
-              <ArrowDownUp size={18} />
-              <span>
-                <strong>Queued means accepted locally.</strong> Acknowledgements
-                distinguish applied, conflict, and rejected outcomes.
-              </span>
-            </p>
-            <p>
-              <GitPullRequest size={18} />
-              <span>
-                <strong>Approval is a decision.</strong> Code is verified only
-                when application includes a real commit and passing evidence.
-              </span>
-            </p>
-            <p>
-              <CheckCheck size={18} />
-              <span>
-                <strong>Read the evidence.</strong> Legacy output text, task
-                completion, and agent registration do not prove tests or model
-                execution.
-              </span>
-            </p>
-            <p>
-              <CommandIcon size={18} />
-              <span>
-                <strong>Keep credentials in the local service.</strong> Device
-                bearer tokens never belong in this browser.
-              </span>
-            </p>
-            <button className="button primary" onClick={() => setHelp(false)}>
-              Got it
-            </button>
-          </div>
-        </Modal>
       )}
     </div>
   );

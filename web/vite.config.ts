@@ -42,10 +42,7 @@ export default defineConfig({
         changeOrigin: false,
       },
       "/api": {
-        target:
-          process.env.UD_API_TARGET ??
-          process.env.UD_LOCAL_TARGET ??
-          "http://127.0.0.1:4100",
+        target: process.env.UD_API_TARGET ?? "http://127.0.0.1:4000",
         changeOrigin: false,
       },
     },

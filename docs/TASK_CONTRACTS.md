@@ -1,0 +1,133 @@
+# Upside-Down 2.0: Task Contracts 2.0 Specification
+## Multi-Agent Work Division & Bounding Policy
+
+During hackathons, unconstrained AI coding assistants frequently overwrite teammate files, break build pipelines, and introduce conflicting schemas. **Task Contracts 2.0** (`UD-IC/2.0`) provide machine-readable, enforceable boundaries for autonomous and semi-autonomous coding agents.
+
+---
+
+## 1. Task Contract Schema (`contractVersion: "2.0"`)
+
+Every unit of work decomposed from the architecture blueprint adheres to the following TypeScript interface:
+
+```typescript
+export interface TaskContractV2 {
+  contractVersion: "2.0";
+  taskId: string;                      // Unique ID (e.g., "TASK-001")
+  projectId: string;                   // Hackathon Project UUID
+  title: string;                       // Plain-language action summary
+  assignedRole: "frontend" | "backend" | "ai_integration" | "fullstack";
+  status: "backlog" | "ready" | "assigned" | "in_progress" | "blocked" | "in_review" | "completed";
+  priority: "low" | "medium" | "high" | "critical";
+  dependencies: string[];              // Prerequisites before work can start
+  objective: string;                   // High-level functional goal
+  allowedPaths: string[];              // Strict file/directory whitelist
+  protectedPaths: string[];            // Strict file/directory blacklist
+  inputs: Record<string, unknown>;     // API schemas, config, mock responses
+  deliverables: string[];              // Concrete files and exported symbols
+  acceptanceCriteria: string[];        // Verification requirements
+  owner?: {
+    memberId?: string;
+    memberName?: string;
+    assignedSlot?: string;             // "developer-a" | "developer-b" | "developer-c"
+    agentTool?: string;                // "antigravity" | "claude-code" | "codex" | ...
+  };
+  leaseExpiration?: string;            // ISO timestamp for lock TTL
+  progressPercent: number;             // 0 to 100
+  evidence?: {                         // Proof of execution for reviewer
+    branch?: string;                   // Git branch name
+    prUrl?: string;                    // GitHub PR URL
+    prNumber?: number;
+    commitHash?: string;
+    testsPassed?: boolean;
+    testOutput?: string;
+    submittedAt?: string;
+  };
+  blockerReason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+---
+
+## 2. Path Isolation and Bounding Rules
+
+### 2.1 The Allowed Paths Whitelist
+An agent assigned to a task is strictly bounded to `allowedPaths`. For example:
+- **Developer A (Frontend):**
+  ```json
+  "allowedPaths": [
+    "web/src/features/dashboard/*",
+    "web/src/components/*",
+    "web/src/styles/*"
+  ]
+  ```
+- **Developer B (Backend):**
+  ```json
+  "allowedPaths": [
+    "server/api/v1/auth.ts",
+    "server/db/schema.ts",
+    "server/tests/auth.test.ts"
+  ]
+  ```
+- **Developer C (AI / Integrations):**
+  ```json
+  "allowedPaths": [
+    "server/core/aiEngine.ts",
+    "server/services/externalApi.ts",
+    "server/tests/ai.test.ts"
+  ]
+  ```
+
+### 2.2 The Protected Paths Blacklist
+Protected paths can never be touched without host override:
+- `package.json` / `package-lock.json` (prevents uncontrolled dependency churn)
+- Root environment files (`.env`, `.env.production`)
+- CI/CD configurations (`.github/workflows/*`)
+- Shared database migrations (`migrations/001_core.sql`)
+
+### 2.3 Automated Collision Detection
+The Collision Engine (`server/core/integrationEngine.ts`) audits active contracts prior to integration:
+```typescript
+function detectCollisions(tasks: TaskContractV2[]): {
+  hasCollision: boolean;
+  collidingFiles: string[];
+  tasksInvolved: string[];
+  summary: string;
+}
+```
+If two agents have overlapping glob expressions, the platform warns the team, halts automatic merging, and prompts the host to adjust boundaries or schedule sequential execution.
+
+---
+
+## 3. Task Leasing & Lifecycle State Machine
+
+```
+   ┌─────────┐
+   │ Backlog │
+   └────┬────┘
+        │ Dependencies met
+        ▼
+   ┌─────────┐       Agent Claim (with TTL)       ┌──────────┐
+   │  Ready  ├───────────────────────────────────►│ Assigned │
+   └─────────┘                                    └────┬─────┘
+                                                       │ First commit / heartbeat
+                                                       ▼
+   ┌─────────┐            Dependency Missing      ┌─────────────┐
+   │ Blocked │◄───────────────────────────────────┤ In Progress │
+   └────┬────┘                                    └────┬────────┘
+        │ Resolved via Handoff                         │ Submit PR & Test Evidence
+        └──────────────────────────────────────────────┤
+                                                       ▼
+   ┌───────────┐         Host Verification        ┌───────────┐
+   │ Completed │◄─────────────────────────────────┤ In Review │
+   └───────────┘                                  └───────────┘
+```
+
+1. **Backlog:** Generated by the AI Architecture Engine.
+2. **Ready:** All prerequisites in `dependencies` are `completed`.
+3. **Assigned:** Leased to a developer and their connected agent tool. A lease timestamp (`leaseExpiration`) guarantees work isn't abandoned if an agent crashes.
+4. **In Progress:** Work is actively underway. Periodic progress updates (`progressPercent: 0-100`) broadcast to the UI.
+5. **Blocked:** The agent requires an interface from another agent. Triggers a Cross-Agent Handoff.
+6. **In Review:** Agent has submitted code, branch, and test evidence (`testsPassed: true`).
+7. **Completed:** Verified and approved by the team or host.

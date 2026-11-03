@@ -19,6 +19,7 @@ import type { SyncEvent } from "../../contracts/sync.ts";
 import type { Principal } from "../core/syncGateway.ts";
 import { createSyncRouter } from "../sync/router.ts";
 import { AuthManager } from "../core/auth.ts";
+import { createHackathonRouter } from "./hackathonRoutes.ts";
 
 export function createApiRouter(
   coordinator: CoordinatorService,
@@ -31,6 +32,9 @@ export function createApiRouter(
 
   // Populate authenticated principal from Authorization header
   router.use(auth.middleware());
+
+  // Mount Upside-Down 2.0 Hackathon Mission Control Router
+  router.use(createHackathonRouter(coordinator.getDatabase().getRawDb(), coordinator));
 
   // --- Health Check ---
   router.get("/health", (_req: Request, res: Response) => {
