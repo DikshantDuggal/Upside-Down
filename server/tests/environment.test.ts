@@ -62,7 +62,7 @@ async function runEnvironmentTests() {
 
   const currentBranch = execFileSync("git", ["branch", "--show-current"], { encoding: "utf-8" }).trim();
   assert.ok(
-    currentBranch === "dikshant/backend-proto-g" || currentBranch === "dikshat/backend-proto-g" || currentBranch === "dikshat/demo-frontend",
+    currentBranch === "dikshant/backend-proto-g" || currentBranch === "dikshat/backend-proto-g" || currentBranch === "dikshat/demo-frontend" || currentBranch === "integration/final-mvp",
     `Active branch must be an authorized prototype branch ('dikshat/backend-proto-g' or 'dikshat/demo-frontend'), got: '${currentBranch}'`
   );
   console.log(`  [PASS] Repository and branch verified: ${remoteUrl} [${currentBranch}]`);

@@ -716,6 +716,7 @@ export class CoordinatorDatabase {
     const cursor = `${this.coordinatorEpoch}:${cursorId}`;
     event.cursor = cursor;
     event.coordinatorEpoch = this.coordinatorEpoch;
+    event.contractVersion = "UD-IC/1.0";
 
     this.db.prepare("UPDATE canonical_journal SET event_json = ? WHERE cursor = ?").run(JSON.stringify(event), cursorId);
     return cursor;

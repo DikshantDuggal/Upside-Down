@@ -1,0 +1,31 @@
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { resolve } from "node:path";
+import { LocalStore } from "./store.ts";
+import { CoordinatorClient } from "./transport.ts";
+import { createLocalService } from "./server.ts";
+
+const dbPath = process.env.UD_DEVICE_DB ?? resolve("data", "device.db");
+const store = new LocalStore(dbPath);
+const pairingPath = `${dbPath}.session.json`;
+if (!existsSync(pairingPath)) writeFileSync(pairingPath, JSON.stringify({ pairingKey: randomBytes(32).toString("hex") }), { flag: "wx", mode: 0o600 });
+const pairingKey = JSON.parse(readFileSync(pairingPath, "utf8")).pairingKey;
+const tokenFile = process.env.UD_DEVICE_TOKEN_FILE;
+const token = tokenFile ? readFileSync(tokenFile, "utf8").trim() : undefined;
+if (tokenFile && !token) throw new Error("Device token file is empty");
+const port = Number(process.env.UD_LOCAL_PORT ?? "4100");
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("UD_LOCAL_PORT must be 1..65535");
+const allowedOrigins = (process.env.UD_ALLOWED_ORIGINS ?? "").split(",").filter(Boolean).map(value => { const url = new URL(value); if (url.origin !== value || !["http:", "https:"].includes(url.protocol)) throw new Error("UD_ALLOWED_ORIGINS requires exact HTTP(S) origins"); return value; });
+const client = process.env.UD_COORDINATOR_URL && token ? new CoordinatorClient(process.env.UD_COORDINATOR_URL, token) : undefined;
+const reviewerFile = process.env.UD_REVIEWER_TOKEN_FILE;
+const reviewerToken = reviewerFile ? readFileSync(reviewerFile, "utf8").trim() : undefined;
+if (reviewerFile && (!reviewerToken || !process.env.UD_COORDINATOR_URL)) throw new Error("Reviewer credential requires a nonempty protected file and coordinator URL");
+if (reviewerToken && reviewerToken === token) throw new Error("Reviewer and device credentials must be separate");
+const reviewerClient = reviewerToken ? new CoordinatorClient(process.env.UD_COORDINATOR_URL!, reviewerToken) : undefined;
+const service = await createLocalService({ store, client, reviewerClient, pairingKey, port, allowedOrigins });
+console.log(`Backend B local service: ${service.origin}; device ${store.deviceId}; ${client ? "sync configured" : "queue-only; coordinator URL/token required for sync"}`);
+console.log("Browser pairing uses the protected .session.json file beside UD_DEVICE_DB. Keep that file and device credentials private.");
+if (reviewerClient) console.log("Separately enrolled reviewer authority is enabled for this local service's paired browsers.");
+let closing = false;
+async function shutdown() { if (closing) return; closing = true; await service.close(); store.close(); }
+process.on("SIGINT", () => void shutdown()); process.on("SIGTERM", () => void shutdown());

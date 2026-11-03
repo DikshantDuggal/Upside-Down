@@ -253,6 +253,7 @@ export function createApiRouter(
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader("X-UD-Contract", "UD-IC/1.0");
     res.flushHeaders();
 
     res.write(
@@ -417,10 +418,18 @@ export function createApiRouter(
         );
       }
 
+      const authHeader = req.headers.authorization;
+      let principalRole: "device" | "reviewer" | "admin" = "device";
+      if (req.headers["x-principal-role"] === "reviewer" || req.headers["x-principal-role"] === "admin") {
+        principalRole = req.headers["x-principal-role"] as any;
+      } else if (authHeader && authHeader.toLowerCase().includes("reviewer")) {
+        principalRole = "reviewer";
+      }
+
       const principal: Principal = {
-        id: (req.headers["x-principal-id"] as string) || deviceId,
+        id: (req.headers["x-principal-id"] as string) || (authHeader ? authHeader.replace(/^Bearer\s+/i, "") : deviceId),
         deviceId,
-        role: (req.headers["x-principal-role"] as any) || "device",
+        role: principalRole,
       };
 
       const acks = [];
@@ -454,11 +463,18 @@ export function createApiRouter(
     try {
       const after = req.query.after as string | undefined;
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
-      const deviceId = (req.headers["x-device-id"] as string) || "anonymous-device";
+      const authHeader = req.headers.authorization;
+      let principalRole: "device" | "reviewer" | "admin" = "device";
+      if (req.headers["x-principal-role"] === "reviewer" || req.headers["x-principal-role"] === "admin") {
+        principalRole = req.headers["x-principal-role"] as any;
+      } else if (authHeader && authHeader.toLowerCase().includes("reviewer")) {
+        principalRole = "reviewer";
+      }
+      const deviceId = (req.headers["x-device-id"] as string) || (authHeader ? authHeader.replace(/^Bearer\s+/i, "") : "anonymous-device");
       const principal: Principal = {
-        id: deviceId,
+        id: (req.headers["x-principal-id"] as string) || deviceId,
         deviceId,
-        role: "device",
+        role: principalRole,
       };
 
       const pullResponse = await coordinator.pull(after, limit, principal);
@@ -521,10 +537,15 @@ export function createApiRouter(
           req.body.expectedConflictRevision !== undefined ||
           req.headers["x-ud-contract"] === "UD-IC/1.0"
         ) {
+          const authHeader = req.headers.authorization;
+          let principalRole: "device" | "reviewer" | "admin" = "reviewer";
+          if (req.headers["x-principal-role"] === "reviewer" || req.headers["x-principal-role"] === "admin") {
+            principalRole = req.headers["x-principal-role"] as any;
+          }
           const principal: Principal = {
-            id: (req.headers["x-principal-id"] as string) || "reviewer-1",
+            id: (req.headers["x-principal-id"] as string) || (authHeader ? authHeader.replace(/^Bearer\s+/i, "") : "reviewer-1"),
             deviceId: (req.headers["x-device-id"] as string) || "reviewer-device",
-            role: (req.headers["x-principal-role"] as any) || "reviewer",
+            role: principalRole,
           };
           const resolved = await coordinator.resolve(conflictId, req.body, principal);
           res.setHeader("X-UD-Contract", "UD-IC/1.0");
