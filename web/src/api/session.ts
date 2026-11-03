@@ -11,6 +11,12 @@ declare global {
 }
 let current: BrowserSession = { canReview: false };
 const listeners = new Set<() => void>();
+export const SESSION_EXPIRED = "upside-down:session-expired";
+export function expireBrowserSession() {
+  configureBrowserSession({ canReview: false });
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new Event(SESSION_EXPIRED));
+}
 
 // Integration hook for B's authenticated same-origin host. This is a UI hint;
 // authorization always belongs to A/B. Never accepts a device bearer token.

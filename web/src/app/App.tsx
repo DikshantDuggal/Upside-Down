@@ -25,6 +25,8 @@ import {
   X,
 } from "lucide-react";
 import { useDashboard } from "./useDashboard";
+import { useLocalSession } from "./useLocalSession";
+import { LocalSessionCard, PairBrowser } from "../features/LocalSession";
 import { errorMessage, idPath, request } from "../api/client";
 import {
   patchSchema,
@@ -124,6 +126,11 @@ function initialPage(): Page {
 export function App() {
   const data = useDashboard();
   const session = useBrowserSession();
+  const localSession = useLocalSession();
+  const [pairing, setPairing] = useState(false);
+  useEffect(() => {
+    if (session.csrfToken) void data.refresh();
+  }, [session.csrfToken, data.refresh]);
   const [page, setPage] = useState<Page>(initialPage);
   const [sidebar, setSidebar] = useState(false);
   const [taskId, setTaskId] = useState<string>();
@@ -178,7 +185,7 @@ export function App() {
   const unavailable = !journal
     ? "The local service is unavailable. No command has been queued."
     : !session.csrfToken
-      ? "The local service is connected; authenticated browser session integration is still required for writes."
+      ? "Pair this browser with the local service to submit commands."
       : storageError
         ? "Browser retry records could not be saved. Resolve storage access before submitting."
         : undefined;
@@ -505,6 +512,14 @@ export function App() {
               <ArrowUpRight size={13} />
             </button>
           </div>
+          {localSession.status === "required" && (
+            <Notice>
+              Pair this browser to open the local workspace.{" "}
+              <button className="inline-link" onClick={() => setPairing(true)}>
+                Pair browser
+              </button>
+            </Notice>
+          )}
           {data.error && <Notice danger>{data.error}</Notice>}
           {notice && (
             <div className="notice dismissible" role="status">
@@ -723,6 +738,12 @@ export function App() {
             />
           )}
           {page === "network" && (
+            <LocalSessionCard
+              session={localSession}
+              open={() => setPairing(true)}
+            />
+          )}
+          {page === "network" && (
             <Network
               data={data}
               intents={intents}
@@ -739,6 +760,9 @@ export function App() {
           </footer>
         </main>
       </div>
+      {pairing && (
+        <PairBrowser pair={localSession.pair} close={() => setPairing(false)} />
+      )}
       {creating && (
         <NewTask
           close={() => setCreating(false)}

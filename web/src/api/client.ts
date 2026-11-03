@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CONTRACT } from "./types";
-import { getBrowserSession } from "./session";
+import { expireBrowserSession, getBrowserSession } from "./session";
 
 export class ApiError extends Error {
   constructor(
@@ -29,6 +29,7 @@ export async function request<T>(
     method?: string;
     versioned?: boolean;
     expectedStatus?: number;
+    sessionBootstrap?: boolean;
   } = {},
 ): Promise<ApiResult<T>> {
   const controller = new AbortController();
@@ -37,20 +38,24 @@ export async function request<T>(
   options.signal?.addEventListener("abort", abort, { once: true });
   if (options.signal?.aborted) abort();
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (options.versioned !== false) headers["X-UD-Contract"] = CONTRACT;
+  // Legacy A ignores this additive header; B requires it even for proxied reads.
+  headers["X-UD-Contract"] = CONTRACT;
   if (options.body !== undefined) {
     const session = getBrowserSession();
-    if (!session.csrfToken) {
+    const pairing =
+      options.sessionBootstrap === true && path === "/local/session";
+    if (!session.csrfToken && !pairing) {
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
       throw new ApiError(
-        "An authenticated local session is required. Session integration is not available yet.",
+        "Pair this browser with the local service before submitting a command.",
         401,
         "LOCAL_SESSION_REQUIRED",
       );
     }
     headers["Content-Type"] = "application/json";
-    headers["X-CSRF-Token"] = session.csrfToken;
+    if (!pairing && session.csrfToken)
+      headers["X-CSRF-Token"] = session.csrfToken;
   }
   if (options.key) headers["Idempotency-Key"] = options.key;
   try {
@@ -79,6 +84,8 @@ export async function request<T>(
         typeof record.message === "string"
           ? record.message
           : `Request failed (${response.status} ${response.statusText || "HTTP error"}).`;
+      if (record.code === "LOCAL_SESSION_REQUIRED" && path !== "/local/session")
+        expireBrowserSession();
       const retry = response.headers.get("Retry-After");
       const seconds = retry === null ? NaN : Number(retry);
       const retryAfterMs =

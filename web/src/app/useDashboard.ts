@@ -288,7 +288,7 @@ export function useDashboard() {
     return subscribeStream(
       // B's local stream/cache closes the bootstrap gap. Let native
       // Last-Event-ID resume remote SSE; a fixed `after` would override it.
-      streamUrl("/api/events/stream", undefined, replay),
+      streamUrl("/api/events/stream", undefined, true),
       "remote",
       {
         status: (remoteStream) =>
