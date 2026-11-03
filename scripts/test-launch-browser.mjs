@@ -47,4 +47,3 @@ try {
   fs.writeFileSync(path.join(root, '.board/evidence/live-browser.json'), JSON.stringify({ passed: true, timestamp: new Date().toISOString(), origin, coordinator, taskId: tasks.find(task => task.title === title).id, assertions: ['official built frontend loaded','actual browser pairing','task durable delivery','one authoritative task','reload persisted task','message delivered and live UI updated','no stored credentials','no browser page errors'] }, null, 2));
   console.log('PASS: official built frontend, pairing, actual durable task/message delivery, live UI updates, reload and credential isolation.');
 } finally { await browser.close(); }
-

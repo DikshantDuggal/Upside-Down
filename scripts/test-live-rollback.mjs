@@ -49,4 +49,3 @@ try {
  if(remote){remote.closeAllConnections();await new Promise(resolve=>remote.close(resolve));}coordinator?.db.close();
  assert.equal(path.dirname(scratch),path.resolve(tmpdir()));assert.ok(path.basename(scratch).startsWith('ud-rollback-'));fs.rmSync(scratch,{recursive:true,force:true});
 }
-
