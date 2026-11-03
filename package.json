@@ -1,0 +1,31 @@
+{
+  "name": "upside-down",
+  "version": "1.0.0",
+  "description": "Offline-First Multi-Agent Coding Collaboration Platform",
+  "main": "server/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types server/index.ts",
+    "dev": "node --experimental-strip-types --watch server/index.ts",
+    "test": "node --experimental-strip-types server/tests/coordinator.test.ts",
+    "build": "tsc"
+  },
+  "keywords": [
+    "offline-first",
+    "multi-agent",
+    "hackathon",
+    "collaboration"
+  ],
+  "author": "Upside-Down Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.1",
+    "typescript": "^5.7.2"
+  }
+}
