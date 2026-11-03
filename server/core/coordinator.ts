@@ -3,7 +3,7 @@
  * Role 1 — Core Backend & Coordinator
  */
 
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { CoordinatorDatabase, type PatchRecord } from "../db/database.ts";
 import type {
   Task,
@@ -45,6 +45,8 @@ export class CoordinatorService {
   private subscribers: Set<EventCallback> = new Set();
   private broadcastCursor: string;
   private broadcasting = false;
+  readonly patchCompletionMode: "legacy_decision" | "verified_application";
+  private verifiedCompletion = false;
 
   private static readonly VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
     pending: ["assigned", "blocked", "running"],
@@ -56,8 +58,9 @@ export class CoordinatorService {
     done: [],
   };
 
-  constructor(db: CoordinatorDatabase) {
+  constructor(db: CoordinatorDatabase, options: { patchCompletionMode?: "legacy_decision" | "verified_application" } = {}) {
     this.db = db;
+    this.patchCompletionMode = options.patchCompletionMode ?? "legacy_decision";
     this.broadcastCursor = db.latestEventCursor();
   }
 
@@ -113,7 +116,7 @@ export class CoordinatorService {
 
   // --- Task Lifecycle ---
 
-  public createTask(req: TaskCreateRequest, source: string = "api"): Task {
+  public createTask(req: TaskCreateRequest, source: string = "api", requestedId?: string): Task {
     return this.db.transaction(() => {
       if (!req || typeof req.title !== "string" || req.title.trim().length === 0 || req.title.trim().length > 200) {
         throw new ValidationError("Task title is required");
@@ -123,7 +126,7 @@ export class CoordinatorService {
 
       const now = new Date().toISOString();
       const task: Task = {
-        id: randomUUID(),
+        id: requestedId ?? randomUUID(),
         title: req.title.trim(),
         description: req.description?.trim(),
         status: "pending",
@@ -178,6 +181,12 @@ export class CoordinatorService {
       this.validateOptionalText(req.ownerId, "ownerId", 200);
       this.validateOptionalText(req.reason, "reason", 2048);
       const current = this.getTask(id);
+      if (this.patchCompletionMode === "verified_application" && req.targetStatus === "done" && !this.verifiedCompletion) {
+        throw new ValidationError("Only a verified application job may complete this task");
+      }
+      if (this.db.readRecord("application_task_locks", id) && !this.verifiedCompletion) {
+        throw new ValidationError("Task is locked by a controlled application job");
+      }
 
       if (req.baseRevision !== current.revision) {
         throw new ConflictError(
@@ -272,7 +281,8 @@ export class CoordinatorService {
     diffContent: string,
     testOutput?: string,
     patchPath?: string,
-    expectedTaskRevision?: number
+    expectedTaskRevision?: number,
+    metadata?: Pick<PatchRecord, "baseCommit" | "diffHash" | "review" | "evidence">
   ): PatchRecord {
     return this.db.transaction(() => {
       const task = this.getTask(taskId);
@@ -290,6 +300,7 @@ export class CoordinatorService {
         diffContent,
         testOutput,
         createdAt: now,
+        ...(metadata ? { ...metadata, taskRevision: task.status === "running" ? task.revision + 1 : task.revision, applicationStatus: "not_applied" as const } : {}),
       };
 
       this.db.savePatch(patch);
@@ -342,6 +353,16 @@ export class CoordinatorService {
       if (patch.status !== "pending") {
         throw new ValidationError(`Patch is already ${patch.status}`);
       }
+      if (this.patchCompletionMode === "verified_application") {
+        const task = this.getTask(patch.taskId);
+        if (!patch.review?.safe || !patch.baseCommit || !patch.diffHash
+            || patch.diffHash !== createHash("sha256").update(patch.diffContent, "utf8").digest("hex")) {
+          throw new ValidationError("Patch has no safe immutable application metadata");
+        }
+        if (patch.taskRevision !== task.revision || task.status !== "review") {
+          throw new ConflictError("Patch task revision changed", task.revision, patch.taskRevision ?? 0);
+        }
+      }
 
       const updated = this.db.updatePatchStatus(id, "approved", reviewerId);
       if (!updated) {
@@ -349,7 +370,7 @@ export class CoordinatorService {
       }
 
       const task = this.getTask(patch.taskId);
-      if (task.status === "review") {
+      if (task.status === "review" && this.patchCompletionMode === "legacy_decision") {
         this.transitionTask(
           task.id,
           {
@@ -425,5 +446,19 @@ export class CoordinatorService {
     if (value !== undefined && (typeof value !== "string" || value.length > max)) {
       throw new ValidationError(`${field} must be a string of at most ${max} characters`);
     }
+  }
+
+  public finishVerifiedApplication(applicationId: string, expectedRevision: number): Task {
+    return this.db.transaction(() => {
+      const application = this.db.readRecord<import("../../contracts/agent.ts").ApplicationRecord>("applications", applicationId);
+      const patch = application ? this.getPatch(application.patchId) : undefined;
+      if (this.patchCompletionMode !== "verified_application" || !application || application.status !== "verified"
+          || !application.commit || !application.evidence.at(-1)?.passed || patch?.status !== "approved") {
+        throw new ValidationError("Application is not durably verified");
+      }
+      this.verifiedCompletion = true;
+      try { return this.transitionTask(application.taskId, { baseRevision: expectedRevision, targetStatus: "done", reason: `Verified application ${application.id}` }, "application_worker"); }
+      finally { this.verifiedCompletion = false; }
+    });
   }
 }

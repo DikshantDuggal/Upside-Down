@@ -12,6 +12,8 @@ import {
 } from "../core/coordinator.ts";
 import type { TaskStatus } from "../../contracts/task.ts";
 import { streamReplay, type ReplayOptions } from "./eventStream.ts";
+import { canReadEvent } from "../core/auth.ts";
+import { ProtocolError } from "../core/protocolError.ts";
 
 export function createApiRouter(coordinator: CoordinatorService, options: ReplayOptions = {}): Router {
   const router = Router();
@@ -120,7 +122,7 @@ export function createApiRouter(coordinator: CoordinatorService, options: Replay
       const since = req.query.since as string | undefined;
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
       const events = coordinator.listEvents(taskId, since, limit);
-      res.json(events);
+      res.json(req.principal ? events.filter((event) => canReadEvent(event, req.principal!)) : events);
     } catch (err) {
       next(err);
     }
@@ -130,7 +132,8 @@ export function createApiRouter(coordinator: CoordinatorService, options: Replay
 
   router.get("/events/stream", (req: Request, res: Response) => {
     if (options.sseReplay) {
-      streamReplay(req, res, coordinator, options);
+      streamReplay(req, res, coordinator, { ...options,
+        ...(req.principal ? { canReadEvent: (event) => canReadEvent(event, req.principal!) } : {}) });
       return;
     }
     res.setHeader("Content-Type", "text/event-stream");
@@ -142,6 +145,7 @@ export function createApiRouter(coordinator: CoordinatorService, options: Replay
     res.write(`event: connected\ndata: ${JSON.stringify({ status: "connected", timestamp: new Date().toISOString() })}\n\n`);
 
     const unsubscribe = coordinator.subscribe((event) => {
+      if (req.principal && !canReadEvent(event, req.principal)) return;
       res.write(`id: ${event.id}\nevent: activity\ndata: ${JSON.stringify(event)}\n\n`);
     });
 
@@ -182,9 +186,10 @@ export function createApiRouter(coordinator: CoordinatorService, options: Replay
 
   router.post("/patches/:id/approve", (req: Request, res: Response, next: NextFunction) => {
     try {
+      if (req.principal?.role === "device") throw new ProtocolError(403, "REVIEWER_REQUIRED", "A separate reviewer credential is required");
       const patchId = String(req.params.id);
       const { reviewerId } = req.body;
-      const patch = coordinator.approvePatch(patchId, reviewerId);
+      const patch = coordinator.approvePatch(patchId, req.principal?.id ?? reviewerId);
       res.json(patch);
     } catch (err) {
       next(err);
@@ -193,9 +198,10 @@ export function createApiRouter(coordinator: CoordinatorService, options: Replay
 
   router.post("/patches/:id/reject", (req: Request, res: Response, next: NextFunction) => {
     try {
+      if (req.principal?.role === "device") throw new ProtocolError(403, "REVIEWER_REQUIRED", "A separate reviewer credential is required");
       const patchId = String(req.params.id);
       const { reviewerId, reason } = req.body;
-      const patch = coordinator.rejectPatch(patchId, reviewerId, reason);
+      const patch = coordinator.rejectPatch(patchId, req.principal?.id ?? reviewerId, reason);
       res.json(patch);
     } catch (err) {
       next(err);
@@ -205,6 +211,8 @@ export function createApiRouter(coordinator: CoordinatorService, options: Replay
   // --- Centralized Error Handling ---
 
   router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (_req.principal && !(err instanceof ConflictError) && !(err instanceof ValidationError) && !(err instanceof NotFoundError)) { _next(err); return; }
+    if (err instanceof ProtocolError) { res.status(err.status).json(err.body()); return; }
     if (err instanceof ConflictError) {
       res.status(409).json({
         error: "Conflict",

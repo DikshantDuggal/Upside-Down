@@ -1,103 +1,211 @@
-# Backend A implementation handoff
+# Backend A: UD-IC/1.0 implementation and verification
 
-Contract reference: UD-IC/1.0, provided 4 November 2026. This is a
-backward-compatible foundation for review, not a claim of full contract acceptance
-or a finished offline-first MVP.
+UD-IC/1.0 means **Upside-Down Integration Contract, version 1.0**. It specifies
+shared task/message types, HTTP routes, authentication, durable acknowledgements,
+revision/conflict rules, replay, execution evidence and patch application. A version
+header alone is not proof of compliance; the behavior below must pass.
 
-## Checkout and ownership
+## Source and ownership
 
-- Prepared on branch: `3-backend-a-contract-v1`.
-- Publication target authorized by the owner: `dikshant/backend`; use Git history
-  for the published commit SHA.
-- Base: `origin/dikshant/backend`, `ec73ff7b1fcc16645484709ea92c51d9dfc46068`.
-- The existing dirty `dikshat/backend-proto-g` checkout was preserved.
-- Changes are confined to Backend A paths. Root config, `server/index.ts`, existing
-  `server/tests/`, Backend B paths and frontend paths are unchanged.
-- This handoff does not authorize a PR merge or deployment. Shared integration
-  and the remaining contract work are still subject to the agreements below.
-- Contract acceptance and shared-file handoffs requested at
-  https://github.com/DikshantDuggal/Upside-Down/issues/1#issuecomment-6613045520.
-  No Backend B/frontend acceptance or handoff was observed during implementation.
+Backend A work continues from `4db4c56` on `3-backend-a-contract-v1`, with publication
+target `dikshant/backend` (PR #3). The separate original checkout/branches and the
+other session's `e322c3b` implementation remain untouched. No merge or deployment
+is performed here. Main already contains the independently owned frontend from PR #8.
 
-## Implemented
+B-owned `contracts/sync.ts`, `server/sync/`, and `client-local/` are imported **unchanged**
+from `55307ada287f0e0c7242be689e62da0d5acc7e33` (PR #6). All new gateway/adapter,
+enrollment, execution, tests and this handoff live in A-owned paths. Accepted
+integration handoffs cover startup and root scripts. B's public `SyncGateway`,
+`Principal`, execution and error types are used directly, without a parallel API.
 
-1. SQLite synchronous same-connection transactions, nested savepoints and after-commit
-   notifications. Tasks, transitions, registry updates and compound patch decisions
-   roll back with their events/journal on persistence failure.
-2. Persistent coordinator epoch and ordered canonical event journal, including an
-   idempotent migration of existing events. Opaque cursors page through tied timestamps
-   and survive restart. Unknown/foreign cursors require reset.
-3. Event ID deduplication with content checks. Identical retries do not rebroadcast;
-   changed content under the same ID is rejected. Observers receive independent event
-   copies and cannot roll back persisted mutations. Reentrant broadcasts preserve
-   committed journal order. Entity snapshots are additive payload fields.
-4. Opt-in SSE replay via `createApiRouter(coordinator, {sseReplay: true})`.
-   Named `activity` frames and event UUID IDs remain compatible. `after` overrides
-   `Last-Event-ID`; replay/live overlap is deduplicated. Bounded replay/backpressure
-   resets slow or expired clients instead of silently dropping history.
-5. Path policy checks old/new diff paths, Windows aliases, case collisions, protected
-   tests/secrets, symbolic links/junctions and hard links. Review findings do not echo
-   detected secret content.
-6. Repair checks provider availability, bounds attempts/candidate size, gates unsafe
-   candidates before test execution, restores source after provider exceptions and
-   preserves independently changed files. Generated patches pass actual Git apply
-   checks for LF, CRLF and missing final newlines.
-7. Test subprocesses have bounded stdout/stderr, hidden Windows child consoles,
-   cancellation and process-tree timeout handling. Spaced executable paths are
-   preserved. npm uses its JS entrypoint when available; batch-shell execution
-   requires an explicit trusted server-side profile and rejects shell metacharacters.
-8. Pipeline review gates and task-revision guards prevent unsafe/stale repair runs
-   from proposing patches or overwriting newer task work.
+Board agreements: contract request #6613045520; B acceptance/handoff #6613787525;
+pairing agreement #6613877596, #6614132100, #6614135924 and #6614142386.
+Updated integration/reviewer request: #6614708645.
 
-## Compatibility and deployment
+## Implemented behavior
 
-Legacy startup, routes, response shapes, exported version constants and approval
-defaults remain. In particular, default legacy approval still marks review tasks
-done; this MUST NOT be described as verified code application. No capabilities
-endpoint advertises UD-IC compliance. Replay is disabled unless explicitly enabled
-by the approved integrator. Existing startup still does not instantiate the pipeline.
+- Same-connection SQLite transactions atomically commit task/message changes,
+  canonical events, sync outcome and contiguous device progress. Persistent epoch,
+  opaque cursor, event/sequence identity checks and original durable ACKs survive restart.
+- B's real router is mounted at `/api/sync`. An adapter translates A's safe error
+  classes, including expired cursors, into B's nominal `ProtocolError` class.
+- Stale proposals become persisted conflicts without changing task owner/revision.
+  Reviewer resolution checks live task and conflict revisions. Private messages are
+  filtered from unrelated devices' pull, history and live/replayed SSE.
+- Manual enrollment produces 256-bit device or separately scoped reviewer/admin
+  credentials; only hashes persist in A. Revocation is enforced. Token output files
+  are exclusive-create and restricted with Windows ACLs, containing only the bearer
+  string expected by B. No token is printed or sent to the browser.
+- Standalone startup defaults to authenticated, loopback, replay-enabled,
+  `verified_application` mode. Configured CORS is explicit. Programmatic legacy
+  `createServer()` behavior remains available for compatibility.
+- Durable run/cancel/read/checkpoint APIs use registered workspace/test IDs,
+  bounded heuristic repair, disposable Git worktrees, ownership/path checks, bounded
+  actual subprocess evidence and a restricted environment. Tests changing source,
+  Git HEAD or the index invalidate evidence. Interrupted runs become blocked;
+  checkpoints explicitly advertise `metadata_only`, never model-state recovery.
+- Approval and application are separate. In verified mode approval leaves `review`
+  and changes no source. Explicit apply verifies immutable diff/base/task revision,
+  retests in an isolated worktree, commits with immutable job/hash markers and
+  fast-forwards only the registered clean dedicated integration worktree.
+- Only durable verified application with passing evidence can set the task `done`.
+  Git-advanced/DB-failed jobs retain locks and reconcile their known commit once;
+  inconsistent recovery stays locked for human inspection. No blind reapplication,
+  forced branch reset, PR merge or Git push occurs in an execution job.
+- Online run/cancel/decision/apply mutations use principal+route+key+body idempotency.
+  Same key/body returns the original response/job; changed bodies return 409.
+- `/api/capabilities` reports actual configured features and completion mode.
+  Execution/apply remain unavailable without trusted local workspace configuration.
 
-SQLite adds `coordinator_metadata` and `canonical_log`; it does not rewrite old task
-or patch tables. Keep the database and WAL together when backing up. Old application
-versions do not maintain the new journal, so a downgrade followed by new writes is
-not a supported journal continuity strategy. No destructive down-migration was run.
+## Run the automated checks (PowerShell)
 
-Run code against disposable/trusted fixtures. Finally-based restoration does not
-make direct legacy repair calls crash-safe or provide OS sandboxing. Durable run
-worktrees and the registered execution/application worker remain pending. No
-automatic watcher or application worker was started by this implementation.
-
-## Validation
-
-Node v24.20.0 / npm 11.19.0 on Windows. Reused installed dependencies through an
-ignored node_modules junction; no package install, lockfile or root config edits.
+From the checkout containing these changes, with Node 24.20+ and installed root
+dependencies (`npm install` if needed; root has no tracked lockfile):
 
 ```powershell
 npm run typecheck
-node --experimental-strip-types --test server/core/__tests__/durability.test.ts server/api/__tests__/eventReplay.test.ts server/agents/__tests__/safety.test.ts
+npm run test:contract
 npm test
+npm --prefix client-local test
+npm --prefix server/sync test
 ```
 
-New suites cover 14 durability, 7 HTTP/SSE and 12 execution safety scenarios.
-Existing regressions cover 6 coordinator and 5 agent scenarios. HTTP/process tests
-need localhost/process permissions; a sandbox EACCES was resolved by approved
-execution outside the sandbox. Full final outputs are saved under ignored `.board/`.
+`test:contract` covers durability, gateway/auth, SSE replay, execution safety, durable
+jobs and joined HTTP acceptance. It creates disposable SQLite databases and Git
+fixtures; it does not use your active source checkout as an execution target. It
+requires permission to listen on localhost and spawn Node/Git child processes.
+`npm test` is the existing sequential regression suite using its legacy fixed port.
+Do not run several copies of that legacy suite concurrently.
 
-## Pending agreement and implementation
+For the joined acceptance tests alone:
 
-- All three role owners' acceptance of UD-IC/1.0 and confirmed Backend B/frontend
-  identities; shared startup/root/test handoffs.
-- B-owned V1 sync types/router and the transactional command inbox/outcome/sequence,
-  conflict-resolution gateway. A durable activity journal alone is not offline sync.
-- Auth enrollment/revocation, separate reviewer authorization, restricted CORS and
-  contract-version/error middleware. Legacy server remains unauthenticated.
-- Durable run/cancel/checkpoint APIs, trusted workspace profiles, isolated run
-  worktrees, worker startup/shutdown/restart reconciliation.
-- Verified application jobs, immutable base/hash guards, dedicated integration
-  worktree, Git/DB recovery and coordinated approval/completion semantics.
-- Capability flags, startup mount, two-device HTTP integration and real frontend
-  acceptance. No LAN/offline demo, local LLM, model recovery or production sandbox
-  is claimed.
+```powershell
+node --experimental-strip-types --test server/api/__tests__/integration.test.ts
+```
 
-The GitHub monitor remains paused independently of this implementation. Manual
-coordination reads/posts do not resume it or consume its checkpoint.
+The joined tests use **A's actual server and B's unchanged actual local HTTP services**,
+not a fake gateway. They prove disconnected queueing, local process/service reopen,
+separate device identities, eventual delivery, stale conflict and authorized
+resolution, private messages, lost ACK followed by coordinator restart, original
+outcome deduplication, enrollment/token-file interoperability, and the complete
+HTTP run/review/approve/apply/verified-commit flow. The failure suites exercise real
+SQLite aborts and Git-advanced/DB-failed reconciliation.
+
+Final observed checks on Windows / Node v24.20.0 / npm 11.19.0:
+`npm run typecheck` exited 0; **61/61 contract checks**, **11/11 legacy checks**,
+**17/17 B local-service tests**, and **4/4 B router tests** passed. `git diff --check`
+exited 0. The final expanded contract suite includes actual CLI/Windows ACL,
+restricted subprocess environment, test-side Git mutation and joined HTTP/Git cases.
+The final contract run took approximately 41 seconds; timing varies by machine.
+
+## Start A and enroll a local device
+
+Use separate PowerShell terminals, the agreed backend checkout, and **absolute local
+disk paths outside source control**. These examples do not change global account or
+Git settings.
+
+Terminal A:
+
+```powershell
+$env:UD_DB_PATH = "$env:LOCALAPPDATA\UpsideDown\coordinator.db"
+$env:UD_HOST = '127.0.0.1'
+$env:PORT = '4000'
+$env:UD_PATCH_COMPLETION_MODE = 'verified_application'
+npm start
+```
+
+No workspace config means sync/read APIs work but execution/apply capabilities are
+false. Auth is required, including `/api/health`. Stop with Ctrl+C; startup performs
+durable recovery before draining queued jobs. The finite queue drain executes only
+accepted jobs; no automatic file-watcher repair is enabled by this bootstrap.
+
+Terminal B, first queue-only boot:
+
+```powershell
+$env:UD_DEVICE_DB = "$env:LOCALAPPDATA\UpsideDown\device-b.db"
+$env:UD_LOCAL_PORT = '4100'
+$env:UD_ALLOWED_ORIGINS = 'http://127.0.0.1:5173'
+npm --prefix client-local start
+```
+
+Record the printed persistent device UUID, then stop B with Ctrl+C. On A's machine,
+replace `DEVICE_UUID_FROM_B` with that actual UUID and enroll it into the same A DB:
+
+```powershell
+npm run enroll -- --db "$env:LOCALAPPDATA\UpsideDown\coordinator.db" --device DEVICE_UUID_FROM_B --role device --out "$env:LOCALAPPDATA\UpsideDown\device-b.token"
+```
+
+Distribute the protected token file to that device through your trusted local
+setup, never the board/browser/repository. On the same computer it is already at
+that path. Restart B with the additional settings:
+
+```powershell
+$env:UD_COORDINATOR_URL = 'http://127.0.0.1:4000'
+$env:UD_DEVICE_TOKEN_FILE = "$env:LOCALAPPDATA\UpsideDown\device-b.token"
+npm --prefix client-local start
+```
+
+A second B instance needs `device-c.db`, port `4101`, its own printed UUID and its
+own separately enrolled credential. Never copy a device database or reuse its token.
+For a reviewer service, enroll a DIFFERENT UUID with `--role reviewer`, a different
+protected output file, and configure B's `UD_REVIEWER_TOKEN_FILE` with that file.
+Revocation uses `npm run enroll -- --db ABSOLUTE_DB --revoke PRINCIPAL_ID`; the
+nonsecret principal ID is printed at enrollment. Output files are never overwritten.
+
+For a real LAN test, explicitly bind A with `UD_HOST=0.0.0.0`, use A's actual private
+LAN IP in B's coordinator URL, and keep local services loopback-bound. This trusted
+private demo transport uses HTTP; no physical internet/LAN cut has been observed
+by these tests. Do not copy an active SQLite DB without its WAL/SHM or claim that
+plain file copies constitute a live backup.
+
+## Trusted execution configuration
+
+Set `UD_WORKSPACE_CONFIG` in A's terminal to an absolute local JSON configuration.
+It is admin-controlled; HTTP accepts IDs, never shell commands or filesystem roots.
+Example (replace every path with your trusted fixture paths; `executable` is the
+actual absolute result of `(Get-Command node).Source`):
+
+```json
+{
+  "runtimeDirectory": "C:/Users/you/AppData/Local/UpsideDown/runtime",
+  "workspaces": [
+    { "id": "source", "repositoryPath": "C:/demo/source", "repairTargetFile": "source.cjs", "allowedPaths": ["source.cjs"], "testProfileIds": ["check"] },
+    { "id": "integration", "repositoryPath": "C:/demo/integration", "integrationBranch": "demo-integration", "allowedPaths": ["source.cjs"], "testProfileIds": ["check"] }
+  ],
+  "testProfiles": [
+    { "id": "check", "executable": "C:/Program Files/nodejs/node.exe", "args": ["check.cjs"], "timeoutMs": 5000 }
+  ]
+}
+```
+
+Source must be a clean Git fixture. Create the dedicated integration worktree from
+its known base with `git -C C:/demo/source worktree add -b demo-integration C:/demo/integration HEAD`.
+Allow only A-owned source paths, not tests or secrets. The registered check must be
+fully local. Worktrees isolate edits; they are not a hostile-code OS sandbox.
+The automated joined fixture demonstrates the configuration without requiring any
+manual source checkout changes.
+
+## Frontend and remaining acceptance
+
+Frontend is on main (`web/`, PR #8); do not replace it with the older B branch.
+In a combined checkout follow `web/README.md`: Vite at 127.0.0.1:5173 proxies to B
+4100, with matching B origin allowlist. Pair using the private local
+`<UD_DEVICE_DB>.session.json` pairing key. Device and reviewer bearers stay on B;
+browsers receive an HttpOnly local session and CSRF token.
+
+A now returns authenticated capability `authorization: {role, canReview}`. A device
+credential always returns false; reviewer/admin returns true. This is an additive
+proposal posted in #6614708645. B must probe with the separately enrolled reviewer
+credential before advertising browser authority; frontend must consume the agreed
+server advertisement. Normal pairing continues to disable reviewer UI. No owner
+handoff/implementation of that B/frontend bridge has yet been observed.
+
+Outstanding team acceptance: joined browser reviewer controls against this A/B
+combination, physical three-laptop LAN/internet-off rehearsal, and team review/merge
+of the unmerged backend work. Automatic file-triggered durable runs remain a
+separate follow-up; manual durable runs are wired and tested. Historical legacy
+`done` tasks remain unverified. No real LLM, cloud-to-local runtime recovery,
+automatic coordinator failover or full MVP acceptance is claimed.
+
+The GitHub coordination monitor remains paused as requested. Manual board reads
+and handoff posts do not resume it or consume unread/wait/heartbeat checkpoints.

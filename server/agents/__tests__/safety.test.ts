@@ -180,3 +180,14 @@ test("a stale repair run cannot propose a patch or fail a newer task revision", 
     assert.ok(fs.readFileSync(path.join(root, "source.cjs"), "utf8").includes("/ 0"));
   } finally { pipeline.stop(); db.close(); }
 });
+
+
+test("restricted test execution does not inherit coordinator credential environment", async () => {
+  const root = fixture();
+  process.env.UD_TEST_PRIVATE_CREDENTIAL = "private-fixture-value";
+  try {
+    const result = await new TestRunner().run({ cwd: root, command: process.execPath,
+      args: ["-e", "process.stdout.write(process.env.UD_TEST_PRIVATE_CREDENTIAL || 'absent')"], inheritEnvironment: false, env: {} });
+    assert.equal(result.passed, true); assert.equal(result.stdout, "absent");
+  } finally { delete process.env.UD_TEST_PRIVATE_CREDENTIAL; }
+});

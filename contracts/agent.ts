@@ -56,3 +56,6 @@ export interface ReviewVerdict {
   reasons: string[];
   touchedFiles: string[];
 }
+
+/** Canonical V1 wire types are owned/exported by the shared sync contract. */
+export type { ErrorV1 as ExecutionError, TestEvidence, Checkpoint, RunRecord, ApplyRequest, ApplicationRecord } from "./sync.ts";

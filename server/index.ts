@@ -6,42 +6,86 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import path from "node:path";
+import fs from "node:fs";
+import { ExecutionJobService } from "./agents/jobService.ts";
+import type { ExecutionConfiguration } from "./workers/gitWorkspace.ts";
+import { createSyncRouter } from "./sync/router.ts";
+import { adaptGateway } from "./api/syncAdapter.ts";
+import { requireContract } from "./api/protocol.ts";
 import { CoordinatorDatabase } from "./db/database.ts";
 import { CoordinatorService } from "./core/coordinator.ts";
 import { createApiRouter } from "./api/routes.ts";
+import { AuthenticationService } from "./core/auth.ts";
+import { CoordinatorSyncGateway } from "./core/syncGateway.ts";
+import { createProtocolRouter, protocolErrors } from "./api/protocol.ts";
+import { ProtocolError } from "./core/protocolError.ts";
+
+export interface ServerOptions { authenticate?: boolean; allowedOrigins?: string[]; sseReplay?: boolean; execution?: ExecutionConfiguration; patchCompletionMode?: "legacy_decision" | "verified_application" }
 
 export interface ServerInstance {
   app: Express;
   db: CoordinatorDatabase;
   coordinator: CoordinatorService;
+  auth: AuthenticationService;
+  gateway: CoordinatorSyncGateway;
+  jobs?: ExecutionJobService;
 }
 
-export function createServer(dbPath?: string): ServerInstance {
+export function createServer(dbPath?: string, options: ServerOptions = {}): ServerInstance {
   const resolvedDbPath = dbPath || path.resolve(process.cwd(), "data", "upside_down.db");
   const db = new CoordinatorDatabase(resolvedDbPath);
-  const coordinator = new CoordinatorService(db);
+  const coordinator = new CoordinatorService(db, { patchCompletionMode: options.patchCompletionMode });
+  const auth = new AuthenticationService(db);
+  const gateway = new CoordinatorSyncGateway(db, coordinator, auth);
 
+  const jobs = options.execution ? new ExecutionJobService(db, coordinator, auth, options.execution) : undefined;
   const app: Express = express();
-  app.use(cors());
-  app.use(express.json());
+  if (options.authenticate) {
+    app.use(cors({ origin: (origin, done) => {
+      if (!origin || options.allowedOrigins?.includes(origin)) done(null, origin ?? false);
+      else done(new ProtocolError(403, "ORIGIN_FORBIDDEN", "Origin is not allowed"));
+    }, allowedHeaders: ["Authorization", "Content-Type", "X-UD-Contract", "Idempotency-Key", "Last-Event-ID"] }));
+  } else app.use(cors());
+  if (options.authenticate) app.use("/api", auth.middleware());
+  // Authenticate outside B's error boundary so credential failures retain A's safe status.
+  app.use("/api/sync", auth.middleware(), requireContract, createSyncRouter(adaptGateway(gateway), (_req, _res, next) => next()));
+  app.use(express.json({ limit: "1mb" }));
+  app.use("/api", createProtocolRouter(auth, coordinator, db, { sseReplay: options.sseReplay, jobs }));
 
   // Mount API router
-  app.use("/api", createApiRouter(coordinator));
+  app.use("/api", createApiRouter(coordinator, { sseReplay: options.sseReplay }));
+  app.use(protocolErrors);
 
-  return { app, db, coordinator };
+  return { app, db, coordinator, auth, gateway, jobs };
 }
 
 // Start standalone server when run directly
 if (process.argv[1] && process.argv[1].endsWith("index.ts")) {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
-  const { app } = createServer();
+  const instance = createServer(process.env.UD_DB_PATH, { authenticate: process.env.UD_ALLOW_LEGACY !== "1",
+    execution: process.env.UD_WORKSPACE_CONFIG ? JSON.parse(fs.readFileSync(process.env.UD_WORKSPACE_CONFIG, "utf8")) : undefined,
+    patchCompletionMode: process.env.UD_PATCH_COMPLETION_MODE === "legacy_decision" ? "legacy_decision" : "verified_application",
+    allowedOrigins: process.env.UD_ALLOWED_ORIGINS?.split(",").map((value) => value.trim()).filter(Boolean), sseReplay: true });
+  const { app } = instance;
+  const host = process.env.UD_HOST ?? "127.0.0.1";
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Upside-Down Coordinator] Server listening on http://localhost:${PORT}`);
+  await instance.jobs?.recover();
+  instance.jobs?.kick();
+  const server = app.listen(PORT, host, () => {
+    const address = server.address();
+    const listeningPort = typeof address === "object" && address ? address.port : PORT;
+    console.log(`[Upside-Down Coordinator] Server listening on http://${host}:${listeningPort}`);
     console.log(`[Upside-Down Coordinator] Role 1 active on branch dikshant/backend`);
     console.log(`[Upside-Down Coordinator] Endpoints:`);
     console.log(`  - Health:     GET  http://localhost:${PORT}/api/health`);
     console.log(`  - Tasks:      GET  http://localhost:${PORT}/api/tasks`);
     console.log(`  - SSE Stream: GET  http://localhost:${PORT}/api/events/stream`);
   });
+  const shutdown = () => {
+    server.closeAllConnections();
+    server.close(() => { void (async () => { await instance.jobs?.shutdown(); instance.db.close(); })(); });
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  server.once("error", (error) => { console.error("Coordinator listen failed:", error.message); void (async () => { await instance.jobs?.shutdown(); instance.db.close(); process.exitCode = 1; })(); });
 }

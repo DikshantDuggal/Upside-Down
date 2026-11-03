@@ -8,6 +8,7 @@ export interface ReplayOptions {
   maxBufferedEvents?: number;
   maxBufferedBytes?: number;
   maxReplayEvents?: number;
+  canReadEvent?: (event: ActivityEvent) => boolean;
 }
 
 /** Durable replay followed by live activity frames; no asynchronous replay gap. */
@@ -60,6 +61,7 @@ export function streamReplay(req: Request, res: Response, coordinator: Coordinat
     else waitingForDrain = !res.write(frame);
   };
   const activity = (event: ActivityEvent) => {
+    if (options.canReadEvent && !options.canReadEvent(event)) return;
     send(`id: ${event.id}\nevent: activity\ndata: ${JSON.stringify(event)}\n\n`);
   };
   res.setHeader("Content-Type", "text/event-stream");

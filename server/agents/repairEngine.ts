@@ -82,7 +82,7 @@ export class RepairEngine {
   public async executeRepair(
     req: AgentRunRequest,
     targetFile: string,
-    testCommand: string
+    testCommand: string | { command: string; args: string[]; signal?: AbortSignal; env?: NodeJS.ProcessEnv; inheritEnvironment?: boolean }
   ): Promise<AgentRunResult> {
     const startTime = Date.now();
     let attempts = 0;
@@ -155,7 +155,7 @@ export class RepairEngine {
       // 4. Verify candidate fix by running tests
       const testResult: TestRunResult = await this.testRunner.run({
         cwd: req.workspacePath,
-        command: testCommand,
+        ...(typeof testCommand === "string" ? { command: testCommand } : testCommand),
         timeoutMs: this.options.timeoutMs,
       });
 

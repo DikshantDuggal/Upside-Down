@@ -10,7 +10,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Task, TaskStatus } from "../../contracts/task.ts";
 import type { ActivityEvent, CanonicalEvent, EventPage } from "../../contracts/events.ts";
-import type { AgentInfo } from "../../contracts/agent.ts";
+import type { AgentInfo, ReviewVerdict, TestEvidence } from "../../contracts/agent.ts";
 
 export interface PatchRecord {
   id: string;
@@ -24,6 +24,13 @@ export interface PatchRecord {
   reviewedAt?: string;
   reviewerId?: string;
   rejectionReason?: string;
+  baseCommit?: string;
+  taskRevision?: number;
+  diffHash?: string;
+  review?: ReviewVerdict;
+  applicationStatus?: "not_applied" | "queued" | "applying" | "verified" | "failed" | "blocked";
+  applicationId?: string;
+  evidence?: TestEvidence[];
 }
 
 export class CursorExpiredError extends Error {
@@ -50,6 +57,7 @@ export class CoordinatorDatabase {
   private transactionDepth = 0;
   private commitCallbacks: (() => void)[] = [];
   private epoch!: string;
+  private eventOrigin?: { originEventId: string; originDeviceId: string; originSequence: number };
 
   constructor(dbPath: string = ":memory:") {
     if (dbPath !== ":memory:") {
@@ -110,10 +118,20 @@ export class CoordinatorDatabase {
     else callback();
   }
 
+  public withEventOrigin<T>(origin: { originEventId: string; originDeviceId: string; originSequence: number }, operation: () => T): T {
+    const previous = this.eventOrigin;
+    this.eventOrigin = origin;
+    try { return operation(); } finally { this.eventOrigin = previous; }
+  }
+
   private initializeJournal(): void {
     this.transaction(() => {
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS coordinator_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS coordinator_records (
+          kind TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL,
+          PRIMARY KEY(kind,id)
+        );
         CREATE TABLE IF NOT EXISTS canonical_log (
           position INTEGER PRIMARY KEY AUTOINCREMENT,
           event_id TEXT NOT NULL UNIQUE REFERENCES activity_events(id),
@@ -153,6 +171,31 @@ export class CoordinatorDatabase {
   public latestEventCursor(): string {
     const row = this.db.prepare("SELECT COALESCE(MAX(position),0) AS position FROM canonical_log").get() as any;
     return this.cursor(Number(row.position));
+  }
+
+  /** A-owned repositories share this connection and its transaction boundary. */
+  public readRecord<T>(kind: string, id: string): T | undefined {
+    const row = this.db.prepare("SELECT value FROM coordinator_records WHERE kind=? AND id=?").get(kind, id);
+    return row ? JSON.parse(String(row.value)) as T : undefined;
+  }
+
+  public listRecords<T>(kind: string, after = "", limit = 1000): { id: string; value: T }[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10000) throw new RangeError("Record limit must be 1..10000");
+    return this.db.prepare("SELECT id,value FROM coordinator_records WHERE kind=? AND id>? ORDER BY id LIMIT ?")
+      .all(kind, after, limit).map((row) => ({ id: String(row.id), value: JSON.parse(String(row.value)) as T }));
+  }
+
+  public insertRecord(kind: string, id: string, value: unknown): void {
+    this.db.prepare("INSERT INTO coordinator_records(kind,id,value) VALUES (?,?,?)").run(kind, id, JSON.stringify(value));
+  }
+
+  public putRecord(kind: string, id: string, value: unknown): void {
+    this.db.prepare(`INSERT INTO coordinator_records(kind,id,value) VALUES (?,?,?)
+      ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value`).run(kind, id, JSON.stringify(value));
+  }
+
+  public deleteRecord(kind: string, id: string): void {
+    this.db.prepare("DELETE FROM coordinator_records WHERE kind=? AND id=?").run(kind, id);
   }
 
   public eventCursor(id: string): string {
@@ -341,10 +384,10 @@ export class CoordinatorDatabase {
 
   public saveEvent(event: ActivityEvent): boolean {
     return this.transaction(() => {
-      const previous = this.db.prepare(`SELECT id,task_id as taskId,source,type,timestamp,payload
-        FROM activity_events WHERE id=?`).get(event.id);
+      const journalEvent = { ...event, ...this.eventOrigin };
+      const previous = this.db.prepare("SELECT event_json FROM canonical_log WHERE event_id=?").get(event.id);
       if (previous) {
-        if (stableJson(this.mapEvent(previous as Record<string, unknown>)) !== stableJson(event)) throw new EventIdentityError();
+        if (stableJson(JSON.parse(String(previous.event_json))) !== stableJson(journalEvent)) throw new EventIdentityError();
         return false;
       }
       const stmt = this.db.prepare(`
@@ -359,7 +402,7 @@ export class CoordinatorDatabase {
         event.timestamp,
         JSON.stringify(event.payload || {})
       );
-      this.appendJournal(event);
+      this.appendJournal(journalEvent);
       return true;
     });
   }
@@ -445,6 +488,10 @@ export class CoordinatorDatabase {
       patch.reviewerId || null,
       patch.rejectionReason || null
     );
+    if (patch.baseCommit !== undefined) this.putRecord("patch_metadata", patch.id, {
+      baseCommit: patch.baseCommit, taskRevision: patch.taskRevision, diffHash: patch.diffHash, review: patch.review,
+      applicationStatus: patch.applicationStatus ?? "not_applied", applicationId: patch.applicationId, evidence: patch.evidence,
+    });
   }
 
   public getPatch(id: string): PatchRecord | null {
@@ -473,6 +520,13 @@ export class CoordinatorDatabase {
     const row = stmt.get(taskId) as Record<string, unknown> | undefined;
     if (!row) return null;
     return this.mapPatch(row);
+  }
+
+  public listPatches(taskId: string): PatchRecord[] {
+    const rows = this.db.prepare(`SELECT id,task_id as taskId,run_id as runId,status,patch_path as patchPath,
+      diff_content as diffContent,test_output as testOutput,created_at as createdAt,reviewed_at as reviewedAt,
+      reviewer_id as reviewerId,rejection_reason as rejectionReason FROM patches WHERE task_id=? ORDER BY created_at,id`).all(taskId);
+    return rows.map((row) => this.mapPatch(row as Record<string, unknown>));
   }
 
   public updatePatchStatus(
@@ -544,6 +598,7 @@ export class CoordinatorDatabase {
       reviewedAt: row.reviewedAt ? String(row.reviewedAt) : undefined,
       reviewerId: row.reviewerId ? String(row.reviewerId) : undefined,
       rejectionReason: row.rejectionReason ? String(row.rejectionReason) : undefined,
+      ...this.readRecord<Partial<PatchRecord>>("patch_metadata", String(row.id)),
     };
   }
 }

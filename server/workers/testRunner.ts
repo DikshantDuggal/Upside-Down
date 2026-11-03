@@ -26,6 +26,7 @@ export interface RunTestOptions {
   args?: string[];
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
+  inheritEnvironment?: boolean;
   signal?: AbortSignal;
   maxOutputBytes?: number;
   /** Server-configured legacy batch profiles only; never set from peer input. */
@@ -91,7 +92,7 @@ export class TestRunner {
         shell,
         windowsHide: true,
         detached: !isWindows,
-        env: { ...process.env, ...options.env },
+        env: { ...(options.inheritEnvironment === false ? {} : process.env), ...options.env },
       });
 
       const terminate = () => {
