@@ -236,6 +236,7 @@ function spawnService(name, color, command, args, cwd, env = {}) {
     cwd,
     env: { ...process.env, ...env },
     stdio: ["pipe", "pipe", "pipe"],
+    shell: IS_WINDOWS,
   });
 
   children.push({ name, process: child });

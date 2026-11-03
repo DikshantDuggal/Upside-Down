@@ -96,7 +96,7 @@ export class SyncWorker {
         object(patch); if (patch.id !== e.payload.patchId) throw new ProtocolError(502, "INVALID_PATCH", "Patch identity mismatch");
         snapshots.push({ kind: "patches", id: e.payload.patchId, value: patch });
       }
-      if (e.type === "message_sent" || e.type === "message.sent") {
+      if (e.type === "message_sent" || e.type === "message.sent" || e.type === "message_received") {
         // A must supply a complete Message in payload.message; no message GET exists in UD-IC/1.0.
         const message = e.payload.message as Message; object(message); uuid(message.id); uuid(message.eventId); uuid(message.senderDeviceId);
         if (typeof message.text !== "string" || typeof message.createdAt !== "string" || typeof message.receivedAt !== "string" || (message.recipientDeviceId && message.recipientDeviceId !== this.store.deviceId && message.senderDeviceId !== this.store.deviceId)) throw new ProtocolError(502, "INVALID_MESSAGE", "Missing or unauthorized message snapshot");

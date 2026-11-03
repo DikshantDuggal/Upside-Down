@@ -52,8 +52,8 @@ async function runDemoTest() {
 
     // Register Agent A (Backend Specialist) and Agent B (Frontend Specialist)
     const agentARes = await api("/agents/register", "POST", {
-      id: "agent-backend-codex",
-      name: "Backend Agent (Codex)",
+      id: "agent-backend-antigravity",
+      name: "Backend Agent (Dikshant's Antigravity)",
       status: "idle",
       runtimeAvailable: true,
     });
@@ -66,14 +66,14 @@ async function runDemoTest() {
     if (agentARes.status !== 200 || agentBRes.status !== 200) {
       throw new Error("Agent registration failed");
     }
-    console.log("  [PASS] Registered Agent A (@agent-backend-codex) and Agent B (@agent-frontend-claude)");
+    console.log("  [PASS] Registered Agent A (@agent-backend-antigravity) and Agent B (@agent-frontend-claude)");
 
     // Step 2: Task Creation & Assignment
     console.log("\n[STEP 2] Creating and Assigning Specialized Tasks...");
     const taskARes = await api("/tasks", "POST", {
       title: "Implement Authentication REST Endpoint & Schema",
       description: "Create /api/auth/login with session token validation and JWT signing.",
-      ownerId: "agent-backend-codex",
+      ownerId: "agent-backend-antigravity",
     });
     const taskBRes = await api("/tasks", "POST", {
       title: "Build Login Dialog & State Integration",
@@ -93,7 +93,7 @@ async function runDemoTest() {
     const ackA = await api(`/tasks/${taskA.id}/transition`, "POST", {
       targetStatus: "running",
       baseRevision: taskA.revision,
-      ownerId: "agent-backend-codex",
+      ownerId: "agent-backend-antigravity",
       reason: "Agent A acknowledged task assignment and started implementation",
     });
     const ackB = await api(`/tasks/${taskB.id}/transition`, "POST", {
@@ -158,7 +158,7 @@ async function runDemoTest() {
     // Step 6: Agent A Issues Structured Handoff to Agent B
     console.log("\n[STEP 6] Agent A Generates Structured Handoff to Agent B...");
     const handoffRes = await api("/handoffs", "POST", {
-      fromAgent: "agent-backend-codex",
+      fromAgent: "agent-backend-antigravity",
       toAgent: "agent-frontend-claude",
       taskId: taskA.id,
       dependentTaskId: taskB.id,

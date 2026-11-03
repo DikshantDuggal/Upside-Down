@@ -8,6 +8,7 @@
     "start": "node --experimental-strip-types server/index.ts",
     "dev": "node --experimental-strip-types --watch server/index.ts",
     "dev:all": "node scripts/dev-all.js",
+    "demo:reset": "node scripts/demo-reset.js",
     "build:frontend": "npm run build:demo && npm run build:team",
     "build": "npm run build:demo && npm run build:team && tsc",
     "typecheck": "tsc --noEmit",

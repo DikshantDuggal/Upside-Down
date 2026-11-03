@@ -23,7 +23,7 @@
     }
   },
   "previousFrontend": "team",
-  "lastActivatedAt": "2026-11-03T21:58:53.265Z",
+  "lastActivatedAt": "2026-11-03T22:13:25.006Z",
   "lastActivationResult": "SUCCESS: Rolled back to Upside-Down Premium Demo Frontend (demo).",
   "rollbackAvailable": true
 }
