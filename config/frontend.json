@@ -1,0 +1,29 @@
+{
+  "activeFrontend": "demo",
+  "availableFrontends": {
+    "demo": {
+      "id": "demo",
+      "name": "Upside-Down Premium Demo Frontend",
+      "version": "1.0.0",
+      "sourceDir": "apps/demo-frontend",
+      "distDir": "public/demo",
+      "bundleFile": "public/demo/app.js",
+      "htmlFile": "public/demo/index.html",
+      "description": "Premium SaaS collaboration cockpit (Linear/Vercel inspired) for live hackathon demonstration."
+    },
+    "team": {
+      "id": "team",
+      "name": "Upside-Down Official Team Frontend",
+      "version": "1.0.0",
+      "sourceDir": "frontend",
+      "distDir": "public/team",
+      "bundleFile": "public/team/app.js",
+      "htmlFile": "public/team/index.html",
+      "description": "Official team implementation developed by assigned frontend engineer."
+    }
+  },
+  "previousFrontend": "team",
+  "lastActivatedAt": "2026-11-03T19:23:18.607Z",
+  "lastActivationResult": "SUCCESS: Rolled back to Upside-Down Premium Demo Frontend (demo).",
+  "rollbackAvailable": true
+}

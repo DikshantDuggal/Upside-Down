@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import { FrontendController } from "./core/frontendController.ts";
 /**
  * Server Entrypoint
  * Full Offline-First Multi-Agent Platform Prototype
@@ -17,6 +19,7 @@ export interface ServerInstance {
   db: CoordinatorDatabase;
   coordinator: CoordinatorService;
   syncEngine: SyncEngine;
+  frontendController: FrontendController;
 }
 
 export function createServer(dbPath?: string): ServerInstance {
@@ -24,6 +27,7 @@ export function createServer(dbPath?: string): ServerInstance {
   const db = new CoordinatorDatabase(resolvedDbPath);
   const coordinator = new CoordinatorService(db);
   const syncEngine = new SyncEngine(db, coordinator);
+  const frontendController = new FrontendController();
 
   // Register default agents if none exist
   const existingAgents = coordinator.listAgents();
@@ -55,16 +59,23 @@ export function createServer(dbPath?: string): ServerInstance {
   app.use(express.json());
 
   // Mount API router
-  app.use("/api", createApiRouter(coordinator, syncEngine));
+  app.use("/api", createApiRouter(coordinator, syncEngine, frontendController));
 
-  // Serve static Dashboard assets
-  const publicDir = path.resolve(process.cwd(), "public");
-  app.use(express.static(publicDir));
+  // Serve active Frontend assets
+  const activePublicDir = frontendController.getActivePublicDir();
+  app.use(express.static(activePublicDir));
+  app.use(express.static(path.resolve(process.cwd(), "public")));
+
   app.get("/", (_req, res) => {
-    res.sendFile(path.join(publicDir, "index.html"));
+    const htmlPath = path.join(frontendController.getActivePublicDir(), "index.html");
+    if (fs.existsSync(htmlPath)) {
+      res.sendFile(htmlPath);
+    } else {
+      res.sendFile(path.join(process.cwd(), "public", "index.html"));
+    }
   });
 
-  return { app, db, coordinator, syncEngine };
+  return { app, db, coordinator, syncEngine, frontendController };
 }
 
 // Start standalone server when run directly

@@ -1,3 +1,4 @@
+import type { FrontendController } from "../core/frontendController.ts";
 import type { ActivityEvent } from "../../contracts/events.ts";
 import { randomUUID } from "node:crypto";
 /**
@@ -16,7 +17,7 @@ import type { TaskStatus } from "../../contracts/task.ts";
 import type { SyncEngine } from "../sync/syncEngine.ts";
 import type { SyncEvent } from "../../contracts/sync.ts";
 
-export function createApiRouter(coordinator: CoordinatorService, syncEngine?: SyncEngine): Router {
+export function createApiRouter(coordinator: CoordinatorService, syncEngine?: SyncEngine, frontendController?: FrontendController): Router {
   const router = Router();
 
   // --- Health Check ---
@@ -379,6 +380,44 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
       }
       syncEngine.resolveConflict(conflictId, resolution, customPayload);
       res.json({ status: "ok", conflictId, resolution });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+
+  // --- Frontend Replacement / Handoff Endpoints ---
+
+  router.get("/frontend/status", (_req: Request, res: Response) => {
+    if (!frontendController) {
+      res.json({ error: "Frontend controller not attached" });
+      return;
+    }
+    res.json(frontendController.getStatus());
+  });
+
+  router.post("/frontend/activate", (req: Request, res: Response, next: NextFunction) => {
+    if (!frontendController) {
+      res.status(400).json({ error: "Frontend controller not attached" });
+      return;
+    }
+    try {
+      const candidatePath = req.body?.candidatePath as string | undefined;
+      const result = frontendController.activateTeamFrontend(candidatePath);
+      res.status(result.success ? 200 : 400).json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/frontend/rollback", (_req: Request, res: Response, next: NextFunction) => {
+    if (!frontendController) {
+      res.status(400).json({ error: "Frontend controller not attached" });
+      return;
+    }
+    try {
+      const result = frontendController.rollbackFrontend();
+      res.status(result.success ? 200 : 400).json(result);
     } catch (err) {
       next(err);
     }
