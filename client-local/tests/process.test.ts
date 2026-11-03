@@ -13,7 +13,7 @@ import { VERSION } from "../../server/sync/protocol.ts";
 async function unusedPort() { const server = createServer(); await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve)); const port = (server.address() as AddressInfo).port; await new Promise<void>(resolve => server.close(() => resolve())); return port; }
 async function boot(db: string) {
   const child = spawn(process.execPath, [fileURLToPath(new URL("../src/main.ts", import.meta.url))], {
-    env: { ...process.env, UD_DEVICE_DB: db, UD_LOCAL_PORT: String(await unusedPort()), UD_COORDINATOR_URL: "", UD_DEVICE_TOKEN_FILE: "", UD_ALLOWED_ORIGINS: "" }, stdio: ["ignore", "pipe", "pipe"] });
+    env: { ...process.env, UD_DEVICE_DB: db, UD_LOCAL_PORT: String(await unusedPort()), UD_COORDINATOR_URL: "", UD_DEVICE_TOKEN_FILE: "", UD_REVIEWER_TOKEN_FILE: "", UD_ALLOWED_ORIGINS: "" }, stdio: ["ignore", "pipe", "pipe"] });
   const origin = await new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => { child.kill(); reject(new Error("Local process startup timed out")); }, 10000);
     let output = "";

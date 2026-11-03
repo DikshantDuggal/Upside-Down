@@ -7,7 +7,7 @@ import { LocalStore, type Change } from "./store.ts";
 import { CoordinatorClient, SyncWorker } from "./transport.ts";
 import { MAX_BODY, object, ProtocolError, safeError, uuid, VERSION } from "../../server/sync/protocol.ts";
 
-export type LocalOptions = { store: LocalStore; client?: CoordinatorClient; pairingKey: string; port?: number; allowedOrigins?: string[]; startWorker?: boolean };
+export type LocalOptions = { store: LocalStore; client?: CoordinatorClient; reviewerClient?: CoordinatorClient; pairingKey: string; port?: number; allowedOrigins?: string[]; startWorker?: boolean };
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
   if (!(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) throw new ProtocolError(415, "JSON_REQUIRED", "Use Content-Type application/json");
@@ -48,6 +48,7 @@ export function readProxyPath(url: URL): string | undefined {
 export async function createLocalService(options: LocalOptions) {
   const { store, client } = options;
   if (options.pairingKey.length < 32) throw new Error("Local pairing key must contain at least 32 characters");
+  if (client && options.reviewerClient && (client.token === options.reviewerClient.token || client.base.origin !== options.reviewerClient.base.origin)) throw new Error("Reviewer requires a separate credential for the same coordinator");
   const sessions = new Map<string, { csrf: string; expires: number }>();
   const sockets = new Set<ServerResponse>();
   const worker = client ? new SyncWorker(store, client) : undefined;
@@ -138,8 +139,21 @@ export async function createLocalService(options: LocalOptions) {
           res.setHeader("X-UD-Stale", "true"); res.setHeader("X-UD-Cached-At", cached.cachedAt); json(res, 200, cached.body); return;
         }
       }
-      if (req.method === "POST" && /^\/api\/(agents\/register|patches\/[^/]+\/(approve|reject|apply)|tasks\/[^/]+\/runs|runs\/[^/]+\/cancel|sync\/conflicts\/[^/]+\/resolve)$/.test(url.pathname)) {
-        throw new ProtocolError(503, "REVIEWER_SESSION_UNAVAILABLE", "Online-only writes await the coordinator-approved session integration");
+      if (req.method === "POST") {
+        const registry = url.pathname === "/api/agents/register";
+        const action = url.pathname.match(/^\/api\/(?:patches\/([^/]+)\/(approve|reject|apply)|tasks\/([^/]+)\/runs|runs\/([^/]+)\/cancel|sync\/conflicts\/([^/]+)\/resolve)$/);
+        if (registry || action) {
+          if (url.search) throw new ProtocolError(400, "INVALID_QUERY", "Online action routes do not accept query parameters");
+          if (action) uuid(action[1] ?? action[3] ?? action[4] ?? action[5]);
+          const online = registry ? client : options.reviewerClient;
+          if (!online) throw new ProtocolError(503, registry ? "COORDINATOR_UNREACHABLE" : "REVIEWER_SESSION_UNAVAILABLE", registry ? "Coordinator is not configured" : "A separately enrolled reviewer credential must be configured for this local service");
+          const input = await readJson(req); object(input);
+          const key = req.headers["idempotency-key"];
+          if (typeof key !== "string" || !key || key.length > 200) throw new ProtocolError(400, "IDEMPOTENCY_KEY_REQUIRED", "Online writes require a stable Idempotency-Key");
+          // Exactly one attempt. Ambiguous failures stay online-only and must be reconciled with A.
+          const result = await online.requestResult(url.pathname, { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+          json(res, result.status, result.body); return;
+        }
       }
       throw new ProtocolError(404, "NOT_FOUND", "Route not found");
     } catch (error) {

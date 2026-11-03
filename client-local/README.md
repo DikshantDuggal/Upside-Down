@@ -120,10 +120,20 @@ Offline cached GET responses preserve the upstream JSON shape and include
 `X-UD-Stale: true` and `X-UD-Cached-At`. Uncached reads return 503. Cache invalidation after
 pull prevents an earlier proxy task snapshot from hiding a newer canonical task.
 
-Online-only mutation proxies currently return 503 `REVIEWER_SESSION_UNAVAILABLE`,
-including registry/run/patch/conflict writes. These are never queued. A must agree the
-separate reviewer/online authority mechanism before enabling forwarding. Local pairing
-does not turn the device token into reviewer authority.
+Online-only mutation proxies are allowlisted and attempted once. Agent registration uses
+the device credential; run controls, patch decisions/application and conflict resolution
+require a separate reviewer/admin credential, following A's accepted convention. Configure
+`UD_REVIEWER_TOKEN_FILE` to a private file containing that separately enrolled token only
+on a reviewer's local service. It must differ from `UD_DEVICE_TOKEN_FILE`. Configuring it
+grants online reviewer actions to this service's paired browsers; the frontend's trusted
+host may then set `canReview:true`. A still enforces the credential's actual role/scope.
+
+Without that credential, reviewer actions return 503 `REVIEWER_SESSION_UNAVAILABLE`.
+Online actions require a stable Idempotency-Key and preserve the upstream success status.
+Failures are never queued or automatically retried. After an ambiguous failure, reconcile
+with A using the same key; do not infer that the action failed before committing.
+Local pairing does not turn the device token into reviewer authority. Actual production
+reviewer enrollment, policy enforcement and frontend controls still require joint testing.
 
 ## Backend A mount and gateway handoff
 

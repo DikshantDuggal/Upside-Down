@@ -12,7 +12,8 @@ export class CoordinatorClient {
     this.base = new URL(base); this.token = token; this.timeoutMs = timeoutMs;
     if (!["http:", "https:"].includes(this.base.protocol) || this.base.username || this.base.password || this.base.pathname !== "/" || this.base.search || this.base.hash) throw new Error("Coordinator must be an explicit HTTP(S) origin");
   }
-  async request(path: string, init: RequestInit = {}): Promise<any> {
+  async request(path: string, init: RequestInit = {}): Promise<any> { return (await this.requestResult(path, init)).body; }
+  async requestResult(path: string, init: RequestInit = {}): Promise<{ body: any; status: number }> {
     if (!path.startsWith("/api/")) throw new Error("Only coordinator API routes are permitted");
     const controller = new AbortController(); this.pending.add(controller);
     try {
@@ -32,12 +33,16 @@ export class CoordinatorClient {
       let body: any; try { body = JSON.parse(raw); } catch { /* Legacy non-JSON errors. */ }
       const retry = response.headers.get("Retry-After");
       const ms = retry ? (/^\d+$/.test(retry) ? Number(retry) * 1000 : Math.max(0, Date.parse(retry) - Date.now())) : undefined;
-      throw new ProtocolError(response.status, body?.code ?? `UPSTREAM_${response.status}`, "Coordinator request failed", {
+      throw new ProtocolError(response.status, typeof body?.code === "string" ? body.code : `UPSTREAM_${response.status}`,
+        response.status < 500 && typeof body?.message === "string" && body.message.length <= 2048 ? body.message : "Coordinator request failed", {
+        ...(Number.isSafeInteger(body?.details?.currentRevision ?? body?.currentRevision) ? { currentRevision: body?.details?.currentRevision ?? body?.currentRevision } : {}),
+        ...(Number.isSafeInteger(body?.details?.baseRevision ?? body?.baseRevision) ? { baseRevision: body?.details?.baseRevision ?? body?.baseRevision } : {}),
+        ...(typeof body?.details?.conflictId === "string" ? { conflictId: body.details.conflictId } : {}),
         ...(body?.details?.expectedSequence ? { expectedSequence: body.details.expectedSequence } : {}),
         ...(Number.isFinite(ms) ? { retryAfterMs: ms } : {}) });
     }
     if (path.startsWith("/api/sync/") && response.headers.get("X-UD-Contract") !== VERSION) throw new ProtocolError(426, "CONTRACT_MISMATCH", "Coordinator does not advertise UD-IC/1.0");
-    try { return JSON.parse(raw); } catch { throw new ProtocolError(502, "INVALID_RESPONSE", "Coordinator returned invalid JSON"); }
+    try { return { body: JSON.parse(raw), status: response.status }; } catch { throw new ProtocolError(502, "INVALID_RESPONSE", "Coordinator returned invalid JSON"); }
     } finally { this.pending.delete(controller); }
   }
   abortPending() { for (const controller of this.pending) controller.abort(); }

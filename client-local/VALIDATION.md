@@ -13,9 +13,14 @@ Final pre-commit checks:
 
 | Command | Exit | Result |
 |---|---:|---|
-| `npm --prefix client-local test` | 0 | 16 tests passed; 0 failed/skipped |
+| `npm --prefix client-local test` | 0 | 17 tests passed; 0 failed/skipped |
 | `npm --prefix server/sync test` | 0 | 4 tests passed; 0 failed/skipped |
 | `npm --prefix client-local run typecheck:baseline` | 0 | Local service, router and tests compile against pinned A types |
+
+Both `npm --prefix client-local start` and `npm --prefix client-local run dev` were
+also launched with separate smoke databases on loopback ports 49161/49162. Both reached
+the startup-ready message in queue-only mode. They were intentionally stopped with
+Ctrl-C (wrapper exit 1); neither port remained listening afterward.
 
 The first sandboxed HTTP run could not connect to loopback (`EACCES`). The recorded
 passing HTTP runs used permitted loopback execution. A test cleanup-order failure and
@@ -35,6 +40,9 @@ real HTTP ports, plus a real child process that is force-killed/restarted:
 - 401/403/426 stop the worker and retain the queue.
 - Authentication, device match, batch validation, partial failures, cursor bounds,
   CSRF/origin/Host checks and SSE replay/forwarding have automated coverage.
+- Online writes use a distinct reviewer bearer, preserve upstream 202, and neither
+  retry nor create outbox entries after a dropped online response. Registry forwarding
+  uses the device credential; missing reviewer configuration cannot elevate that token.
 
 The coordinator in the replication test is a durable HTTP **fixture**. It is not
 Backend A's production gateway. A's mutation/sequence/conflict/message semantics,

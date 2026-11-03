@@ -83,3 +83,25 @@ test("remote SSE proxy keeps bearer server-side and forwards frames and Last-Eve
   const response = await fetch(`${service.origin}/api/events/stream?contractVersion=${encodeURIComponent(VERSION)}`, { headers }); const frames = await response.text();
   assert.equal(response.status, 200); assert.equal(receivedAuth, "Bearer private-fixture-token"); assert.equal(receivedId, "original-event"); assert.match(frames, /id: existing-event\nevent: activity/); assert.ok(!frames.includes("private-fixture-token"));
 });
+
+test("online actions use separate reviewer credentials, preserve status, and never queue or retry failures", async t => {
+  const received: { authorization?: string; key?: string; path?: string }[] = []; let fail = false;
+  const upstream = createServer(async (req, res) => {
+    for await (const _ of req) { /* Consume body, preserving a real completed HTTP request. */ }
+    received.push({ authorization: req.headers.authorization, key: req.headers["idempotency-key"] as string, path: req.url });
+    if (fail) { res.destroy(); return; }
+    res.writeHead(202, { "Content-Type": "application/json" }); res.end(JSON.stringify({ id: "online-job", status: "queued" }));
+  });
+  await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`; const store = new LocalStore(":memory:");
+  const service = await createLocalService({ store, client: new CoordinatorClient(base, "device-only"), reviewerClient: new CoordinatorClient(base, "reviewer-only"), pairingKey: "a".repeat(64), port: 0, startWorker: false });
+  t.after(async () => { await service.close(); store.close(); await new Promise<void>(resolve => upstream.close(() => resolve())); });
+  const headers: Record<string, string> = { "X-UD-Contract": VERSION, "Content-Type": "application/json", Origin: service.origin };
+  const session = await fetch(`${service.origin}/local/session`, { method: "POST", headers, body: JSON.stringify({ pairingKey: "a".repeat(64) }) }); headers.Cookie = session.headers.get("set-cookie")!.split(";")[0]; headers["X-CSRF-Token"] = (await session.json() as any).csrfToken; headers["Idempotency-Key"] = "online-once";
+  const path = `/api/patches/${randomUUID()}/apply`;
+  let response = await fetch(service.origin + path, { method: "POST", headers, body: "{}" }); assert.equal(response.status, 202); assert.equal((await response.json() as any).id, "online-job");
+  assert.deepEqual(received[0], { authorization: "Bearer reviewer-only", key: "online-once", path });
+  response = await fetch(`${service.origin}/api/agents/register`, { method: "POST", headers, body: "{}" }); assert.equal(response.status, 202); await response.json(); assert.equal(received[1].authorization, "Bearer device-only");
+  fail = true; response = await fetch(service.origin + path, { method: "POST", headers, body: "{}" }); assert.equal(response.status, 503); await response.json();
+  assert.equal(received.length, 3); assert.equal(store.health().pendingCount, 0); assert.equal(store.get("nextSequence"), "1");
+});
