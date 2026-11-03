@@ -10,7 +10,9 @@ was at `66aa6ce` with pre-existing modifications and was preserved.
 Canonical A/B/frontend source: merged main `892e65d`, including A `437383c`,
 B `55307ad`, frontend `742bba2` and owner website fixes `05696bc`.
 Exact final local SHA/tree is recorded in `.board/evidence/final-release.json`
-and can be checked with `git log -3 --oneline`. No remote push/main merge occurs.
+and can be checked with `git log -3 --oneline`. The user subsequently authorized
+a normal push to `dikshant/backend` after complete verification. No merge into
+main or public deployment is performed.
 
 The human explicitly approved the narrow project/handoff UI/proxy exception.
 Board records: #6617052077, endpoint scope #6616311809/#6616364660.
@@ -97,10 +99,17 @@ The new home LAN wrapper is `C:\Users\diksh\Start-UpsideDown-LAN.ps1` and uses
 fresh device state, local4111/UI5176. It refuses to reuse the old local token.
 The recurring GitHub monitor remains disabled. No new scheduled agents or shell
 polling loops are created. No live DB reset, source overwrite, force-push,
-branch deletion, remote merge or public deployment occurs.
+branch deletion, merge into main or public deployment occurs.
 
 Actual independent AI implementation, real LLM/cloud-state recovery, automatic
 leader failover and watcher-triggered durable execution remain outside the verified
 scope. Worktrees isolate edits rather than providing a hostile-code OS sandbox.
 HTTP is a trusted private demo-LAN assumption. Demo resets create a fresh marked
 state and retain previous records/checkpoints. Rollback is documented and tested.
+
+## Current publication request
+
+The local-only restriction in the original handoff was superseded by the user's
+explicit request to test everything and then push to `dikshant/backend`.
+`PRE_PUSH_VERIFICATION.md` records the completed checks and the physical-test limit.
+The branch update must be a normal fast-forward; no force push is permitted.
