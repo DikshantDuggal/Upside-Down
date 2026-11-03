@@ -16,3 +16,21 @@ export interface ActivityEvent {
 }
 
 export type EventCallback = (event: ActivityEvent) => void;
+
+/** Additive durable journal metadata; legacy wire fields remain unchanged. */
+export interface CanonicalEvent extends ActivityEvent {
+  contractVersion: "UD-IC/1.0";
+  cursor: string;
+  coordinatorEpoch: string;
+  originEventId?: string;
+  originDeviceId?: string;
+  originSequence?: number;
+}
+
+export interface EventPage {
+  contractVersion: "UD-IC/1.0";
+  events: CanonicalEvent[];
+  nextCursor: string;
+  hasMore: boolean;
+  serverTime: string;
+}

@@ -11,8 +11,9 @@ import {
   NotFoundError,
 } from "../core/coordinator.ts";
 import type { TaskStatus } from "../../contracts/task.ts";
+import { streamReplay, type ReplayOptions } from "./eventStream.ts";
 
-export function createApiRouter(coordinator: CoordinatorService): Router {
+export function createApiRouter(coordinator: CoordinatorService, options: ReplayOptions = {}): Router {
   const router = Router();
 
   // --- Health Check ---
@@ -128,6 +129,10 @@ export function createApiRouter(coordinator: CoordinatorService): Router {
   // --- Server-Sent Events (SSE) Stream ---
 
   router.get("/events/stream", (req: Request, res: Response) => {
+    if (options.sseReplay) {
+      streamReplay(req, res, coordinator, options);
+      return;
+    }
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");

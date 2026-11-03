@@ -7,8 +7,9 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { Task, TaskStatus } from "../../contracts/task.ts";
-import type { ActivityEvent } from "../../contracts/events.ts";
+import type { ActivityEvent, CanonicalEvent, EventPage } from "../../contracts/events.ts";
 import type { AgentInfo } from "../../contracts/agent.ts";
 
 export interface PatchRecord {
@@ -25,8 +26,30 @@ export interface PatchRecord {
   rejectionReason?: string;
 }
 
+export class CursorExpiredError extends Error {
+  readonly code = "CURSOR_EXPIRED";
+  constructor() { super("Unknown or expired event cursor; reload from the journal baseline"); }
+}
+
+export class EventIdentityError extends Error {
+  readonly code = "ID_REUSE";
+  constructor() { super("Event ID is already associated with different content"); }
+}
+
+// Normalize exactly the JSON-safe representation that is persisted. Object key
+// order does not change identity; array order and every business field do.
+function stableJson(value: unknown): string {
+  const sort = (item: any): any => Array.isArray(item) ? item.map(sort)
+    : item !== null && typeof item === "object"
+      ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, sort(item[key])])) : item;
+  return JSON.stringify(sort(JSON.parse(JSON.stringify(value))));
+}
+
 export class CoordinatorDatabase {
   private db: DatabaseSync;
+  private transactionDepth = 0;
+  private commitCallbacks: (() => void)[] = [];
+  private epoch!: string;
 
   constructor(dbPath: string = ":memory:") {
     if (dbPath !== ":memory:") {
@@ -36,7 +59,119 @@ export class CoordinatorDatabase {
       }
     }
     this.db = new DatabaseSync(dbPath);
-    this.initializeSchema();
+    this.db.exec("PRAGMA busy_timeout = 5000;");
+    if (dbPath !== ":memory:") this.db.exec("PRAGMA journal_mode = WAL;");
+    try {
+      this.initializeSchema();
+      this.initializeJournal();
+    } catch (error) { this.db.close(); throw error; }
+  }
+
+  /** Same-connection synchronous transaction. Network/subprocess work stays outside. */
+  public transaction<T>(operation: () => T): T {
+    if (operation.constructor.name === "AsyncFunction") throw new TypeError("Coordinator transactions must be synchronous");
+    const level = this.transactionDepth;
+    const callbackStart = this.commitCallbacks.length;
+    const savepoint = `ud_tx_${level}`;
+    this.db.exec(level === 0 ? "BEGIN IMMEDIATE" : `SAVEPOINT ${savepoint}`);
+    this.transactionDepth++;
+    let result: T;
+    try {
+      result = operation();
+      if (result && typeof (result as any).then === "function") {
+        throw new TypeError("Coordinator transactions must be synchronous");
+      }
+      this.db.exec(level === 0 ? "COMMIT" : `RELEASE SAVEPOINT ${savepoint}`);
+    } catch (error) {
+      try {
+        this.db.exec(level === 0 ? "ROLLBACK" : `ROLLBACK TO SAVEPOINT ${savepoint}`);
+        if (level !== 0) this.db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+      } finally {
+        this.commitCallbacks.length = callbackStart;
+        this.transactionDepth--;
+      }
+      throw error;
+    }
+    this.transactionDepth--;
+    if (level === 0) {
+      const callbacks = this.commitCallbacks;
+      this.commitCallbacks = [];
+      for (const callback of callbacks) {
+        // Persistence already committed: an observer cannot roll it back or make
+        // a successful command appear to fail and invite a duplicate retry.
+        try { callback(); } catch { console.error("Committed event observer failed"); }
+      }
+    }
+    return result;
+  }
+
+  public afterCommit(callback: () => void): void {
+    if (this.transactionDepth) this.commitCallbacks.push(callback);
+    else callback();
+  }
+
+  private initializeJournal(): void {
+    this.transaction(() => {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS coordinator_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS canonical_log (
+          position INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id TEXT NOT NULL UNIQUE REFERENCES activity_events(id),
+          event_json TEXT NOT NULL
+        );
+      `);
+      this.db.prepare("INSERT OR IGNORE INTO coordinator_metadata(key,value) VALUES ('epoch',?)").run(randomUUID());
+      this.epoch = String((this.db.prepare("SELECT value FROM coordinator_metadata WHERE key='epoch'").get() as any).value);
+      // Existing installations retain all legacy events, including tied timestamps.
+      const old = this.db.prepare(`SELECT id, task_id as taskId, source, type, timestamp, payload
+        FROM activity_events WHERE id NOT IN (SELECT event_id FROM canonical_log) ORDER BY timestamp,id`).all();
+      for (const row of old) this.appendJournal(this.mapEvent(row as Record<string, unknown>));
+    });
+  }
+
+  private cursor(position: number): string {
+    return Buffer.from(JSON.stringify([this.epoch, position])).toString("base64url");
+  }
+
+  private position(after?: string): number {
+    if (after === undefined) return 0;
+    try {
+      if (after.length > 512 || !/^[A-Za-z0-9_-]+$/.test(after)) throw new Error();
+      const decoded = JSON.parse(Buffer.from(after, "base64url").toString("utf8"));
+      if (!Array.isArray(decoded) || decoded.length !== 2 || decoded[0] !== this.epoch
+          || !Number.isSafeInteger(decoded[1]) || decoded[1] < 0 || this.cursor(decoded[1]) !== after) throw new Error();
+      if (decoded[1] !== 0 && !this.db.prepare("SELECT 1 FROM canonical_log WHERE position=?").get(decoded[1])) throw new Error();
+      return decoded[1];
+    } catch { throw new CursorExpiredError(); }
+  }
+
+  private appendJournal(event: ActivityEvent): void {
+    const inserted = this.db.prepare("INSERT INTO canonical_log(event_id,event_json) VALUES (?,?)").run(event.id, JSON.stringify(event));
+    if (!Number.isSafeInteger(Number(inserted.lastInsertRowid))) throw new RangeError("Journal position exceeds safe integer range");
+  }
+
+  public latestEventCursor(): string {
+    const row = this.db.prepare("SELECT COALESCE(MAX(position),0) AS position FROM canonical_log").get() as any;
+    return this.cursor(Number(row.position));
+  }
+
+  public eventCursor(id: string): string {
+    const row = this.db.prepare("SELECT position FROM canonical_log WHERE event_id=?").get(id) as any;
+    if (!row) throw new CursorExpiredError();
+    return this.cursor(Number(row.position));
+  }
+
+  public listCanonicalEvents(after?: string, limit = 100): EventPage {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new RangeError("Journal limit must be 1..200");
+    const start = this.position(after);
+    const rows = this.db.prepare("SELECT position,event_json FROM canonical_log WHERE position>? ORDER BY position LIMIT ?")
+      .all(start, limit + 1) as any[];
+    const events: CanonicalEvent[] = rows.slice(0, limit).map((row) => ({
+      ...JSON.parse(String(row.event_json)), contractVersion: "UD-IC/1.0",
+      cursor: this.cursor(Number(row.position)), coordinatorEpoch: this.epoch,
+    }));
+    return { contractVersion: "UD-IC/1.0", events, nextCursor: events.at(-1)?.cursor ?? this.cursor(start),
+      hasMore: rows.length > limit, serverTime: new Date().toISOString() };
   }
 
   private initializeSchema(): void {
@@ -204,19 +339,29 @@ export class CoordinatorDatabase {
 
   // --- Event Operations ---
 
-  public saveEvent(event: ActivityEvent): void {
-    const stmt = this.db.prepare(`
-      INSERT OR IGNORE INTO activity_events (id, task_id, source, type, timestamp, payload)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      event.id,
-      event.taskId || null,
-      event.source,
-      event.type,
-      event.timestamp,
-      JSON.stringify(event.payload || {})
-    );
+  public saveEvent(event: ActivityEvent): boolean {
+    return this.transaction(() => {
+      const previous = this.db.prepare(`SELECT id,task_id as taskId,source,type,timestamp,payload
+        FROM activity_events WHERE id=?`).get(event.id);
+      if (previous) {
+        if (stableJson(this.mapEvent(previous as Record<string, unknown>)) !== stableJson(event)) throw new EventIdentityError();
+        return false;
+      }
+      const stmt = this.db.prepare(`
+        INSERT INTO activity_events (id, task_id, source, type, timestamp, payload)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run(
+        event.id,
+        event.taskId || null,
+        event.source,
+        event.type,
+        event.timestamp,
+        JSON.stringify(event.payload || {})
+      );
+      this.appendJournal(event);
+      return true;
+    });
   }
 
   public listEvents(taskId?: string, since?: string, limit: number = 100): ActivityEvent[] {

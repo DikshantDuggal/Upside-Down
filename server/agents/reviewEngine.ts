@@ -4,6 +4,7 @@
  */
 
 import type { ReviewVerdict } from "../../contracts/agent.ts";
+import { validateSourcePath, isTestPath } from "../workers/pathPolicy.ts";
 
 export class PatchReviewEngine {
   private static readonly DANGEROUS_PATTERNS = [
@@ -20,22 +21,34 @@ export class PatchReviewEngine {
     let score = 100;
 
     // 1. Extract touched files
-    const fileMatches = diffContent.matchAll(/^\+\+\+ b\/(.+)$/gm);
+    const fileMatches = diffContent.matchAll(/^(?:---|\+\+\+) (.+)$/gm);
     for (const match of fileMatches) {
-      const file = match[1].trim();
-      touchedFiles.push(file);
+      const header = match[1].replace(/\r$/, "").split("\t")[0];
+      if (header === "/dev/null") continue;
+      if (!/^[ab]\//.test(header)) {
+        reasons.push("Unsupported or unsafe diff path header"); score -= 50; continue;
+      }
+      const file = header.slice(2);
+      if (!touchedFiles.includes(file)) touchedFiles.push(file);
 
       // Check if patch touches forbidden sensitive files
-      if (file.endsWith(".env") || file.includes("credentials") || file.includes(".git/")) {
-        reasons.push(`Forbidden file modified: ${file}`);
-        score -= 50;
-      }
-
-      // Check if patch touches test files directly
-      if (file.includes(".test.") || file.includes(".spec.")) {
+      if (isTestPath(file)) {
         reasons.push(`Suspicious modification of test file: ${file}`);
         score -= 30;
+      } else {
+        try { validateSourcePath(file); }
+        catch { reasons.push("Forbidden file modified or unsafe path in patch"); score -= 50; }
       }
+    }
+    if (!touchedFiles.length) { reasons.push("Patch has no supported source paths"); score -= 50; }
+    if (/^(?:(?:new|old|deleted) file mode|(?:old|new) mode|index [0-9a-f]+\.\.[0-9a-f]+) (?:120000|160000)\s*$/m.test(diffContent)) {
+      reasons.push("Symbolic links and submodules are not permitted"); score -= 50;
+    }
+    const aliases = new Map<string, string>();
+    for (const file of touchedFiles) {
+      const previous = aliases.get(file.toLowerCase());
+      if (previous && previous !== file) { reasons.push("Case-insensitive source path collision"); score -= 50; }
+      aliases.set(file.toLowerCase(), file);
     }
 
     // 2. Scan added lines for dangerous patterns
@@ -47,7 +60,8 @@ export class PatchReviewEngine {
     for (const line of addedLines) {
       for (const check of PatchReviewEngine.DANGEROUS_PATTERNS) {
         if (check.pattern.test(line)) {
-          reasons.push(`${check.reason} in line: '${line.trim().slice(0, 60)}'`);
+          // A detected secret must never be echoed into logs, events or responses.
+          reasons.push(check.reason);
           score -= 40;
         }
       }
