@@ -25,6 +25,19 @@ if (-not (Test-Path "$ProjectRoot\data")) {
     New-Item -ItemType Directory -Path "$ProjectRoot\data" | Out-Null
 }
 
+# Check for and clear any lingering process on port 4000
+$port4000Conns = Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction SilentlyContinue
+if ($port4000Conns) {
+    foreach ($conn in $port4000Conns) {
+        $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ProcessName -like "*node*") {
+            Write-Host "Clearing previous Node.js process (PID $($proc.Id)) on port 4000..." -ForegroundColor Yellow
+            Stop-Process -Id $proc.Id -Force
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
+
 # Display LAN IP addresses for multi-computer pairing
 Write-Host "`nDetecting local IPv4 addresses for Computer B (Arhaan's client-local):" -ForegroundColor Yellow
 $ipAddresses = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
