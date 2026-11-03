@@ -3,7 +3,8 @@ import { FrontendController } from "./core/frontendController.ts";
 /**
  * Server Entrypoint
  * Full Offline-First Multi-Agent Platform Prototype
- * Protocol Version: 3.0
+ * Architecture & Integration Baseline: UD-IC/1.0
+ * Laptop 1 / Computer A — Authoritative Coordinator & Execution Host
  */
 
 import express, { type Express } from "express";
@@ -13,6 +14,7 @@ import { CoordinatorDatabase } from "./db/database.ts";
 import { CoordinatorService } from "./core/coordinator.ts";
 import { SyncEngine } from "./sync/syncEngine.ts";
 import { createApiRouter } from "./api/routes.ts";
+import { ExecutionPipeline } from "./agents/executionPipeline.ts";
 
 export interface ServerInstance {
   app: Express;
@@ -20,14 +22,25 @@ export interface ServerInstance {
   coordinator: CoordinatorService;
   syncEngine: SyncEngine;
   frontendController: FrontendController;
+  executionPipeline: ExecutionPipeline;
 }
 
 export function createServer(dbPath?: string): ServerInstance {
-  const resolvedDbPath = dbPath || path.resolve(process.cwd(), "data", "upside_down.db");
+  const resolvedDbPath = dbPath || process.env.UD_DB_PATH || path.resolve(process.cwd(), "data", "upside_down.db");
   const db = new CoordinatorDatabase(resolvedDbPath);
   const coordinator = new CoordinatorService(db);
   const syncEngine = new SyncEngine(db, coordinator);
   const frontendController = new FrontendController();
+
+  // Instantiate ExecutionPipeline with safe configuration
+  const executionPipeline = new ExecutionPipeline(
+    {
+      workspacePath: process.env.UD_WORKSPACE_PATH || process.cwd(),
+      testCommand: process.env.UD_TEST_COMMAND || "npm test",
+      autoWatch: process.env.UD_AUTO_WATCH === "true",
+    },
+    coordinator
+  );
 
   // Register default agents if none exist
   const existingAgents = coordinator.listAgents();
@@ -75,23 +88,44 @@ export function createServer(dbPath?: string): ServerInstance {
     }
   });
 
-  return { app, db, coordinator, syncEngine, frontendController };
+  return { app, db, coordinator, syncEngine, frontendController, executionPipeline };
 }
 
 // Start standalone server when run directly
 if (process.argv[1] && process.argv[1].endsWith("index.ts")) {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
-  const { app } = createServer();
+  const HOST = process.env.UD_HOST || "0.0.0.0";
+  const { app, db, executionPipeline } = createServer();
 
-  app.listen(PORT, "0.0.0.0", () => {
+  if (process.env.UD_AUTO_WATCH === "true") {
+    executionPipeline.start();
+  }
+
+  const server = app.listen(PORT, HOST, () => {
     console.log(`=======================================================`);
-    console.log(`[Upside-Down Prototype] Full Platform Live on http://localhost:${PORT}`);
-    console.log(`[Upside-Down Prototype] Target Branch: dikshat/backend-proto-g`);
-    console.log(`  - Dashboard:  GET  http://localhost:${PORT}/`);
-    console.log(`  - Health:     GET  http://localhost:${PORT}/api/health`);
-    console.log(`  - Tasks:      GET  http://localhost:${PORT}/api/tasks`);
-    console.log(`  - Sync:       GET  http://localhost:${PORT}/api/sync/status`);
-    console.log(`  - SSE Stream: GET  http://localhost:${PORT}/api/events/stream`);
+    console.log(`[Upside-Down Coordinator] Authoritative Host Live on http://${HOST}:${PORT}`);
+    console.log(`[Upside-Down Coordinator] Target Branch: dikshant/backend-proto-g`);
+    console.log(`[Upside-Down Coordinator] Protocol Baseline: UD-IC/1.0`);
+    console.log(`  - Capabilities: GET  http://${HOST}:${PORT}/api/capabilities`);
+    console.log(`  - Dashboard:    GET  http://${HOST}:${PORT}/`);
+    console.log(`  - Health:       GET  http://${HOST}:${PORT}/api/health`);
+    console.log(`  - Tasks:        GET  http://${HOST}:${PORT}/api/tasks`);
+    console.log(`  - Sync Push:    POST http://${HOST}:${PORT}/api/sync/push`);
+    console.log(`  - Sync Pull:    GET  http://${HOST}:${PORT}/api/sync/pull`);
+    console.log(`  - SSE Stream:   GET  http://${HOST}:${PORT}/api/events/stream`);
     console.log(`=======================================================`);
   });
+
+  // Graceful shutdown handling
+  const shutdown = () => {
+    console.log("\n[Upside-Down Coordinator] Shutting down cleanly...");
+    executionPipeline.stop();
+    server.close(() => {
+      db.close();
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }

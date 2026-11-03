@@ -1,9 +1,9 @@
 import type { FrontendController } from "../core/frontendController.ts";
-import type { ActivityEvent } from "../../contracts/events.ts";
+import type { ActivityEvent, CanonicalEvent } from "../../contracts/events.ts";
 import { randomUUID } from "node:crypto";
 /**
  * REST API Routes & SSE Stream
- * Role 1 — Core Backend & Coordinator
+ * Role 1 — Core Backend & Coordinator / Baseline: UD-IC/1.0
  */
 
 import { Router, type Request, type Response, type NextFunction } from "express";
@@ -16,8 +16,13 @@ import {
 import type { TaskStatus } from "../../contracts/task.ts";
 import type { SyncEngine } from "../sync/syncEngine.ts";
 import type { SyncEvent } from "../../contracts/sync.ts";
+import type { Principal } from "../core/syncGateway.ts";
 
-export function createApiRouter(coordinator: CoordinatorService, syncEngine?: SyncEngine, frontendController?: FrontendController): Router {
+export function createApiRouter(
+  coordinator: CoordinatorService,
+  syncEngine?: SyncEngine,
+  frontendController?: FrontendController
+): Router {
   const router = Router();
 
   // --- Health Check ---
@@ -31,6 +36,11 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
     });
   });
 
+  // --- Capabilities (UD-IC/1.0 Section 6) ---
+  router.get("/capabilities", (_req: Request, res: Response) => {
+    res.setHeader("X-UD-Contract", "UD-IC/1.0");
+    res.json(coordinator.getCapabilities());
+  });
 
   // --- Project Endpoints ---
 
@@ -105,6 +115,26 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
     }
   });
 
+  router.get("/tasks/:id/patches", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const taskId = String(req.params.id);
+      const patches = coordinator.listPatchesByTaskId(taskId);
+      res.json(patches);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get("/tasks/:id/checkpoints", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const taskId = String(req.params.id);
+      const checkpoints = coordinator.listCheckpoints(taskId);
+      res.json(checkpoints);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.post("/tasks/:id/transition", (req: Request, res: Response, next: NextFunction) => {
     try {
       const taskId = String(req.params.id);
@@ -173,7 +203,6 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
     }
   });
 
-
   router.post("/events", (req: Request, res: Response, next: NextFunction) => {
     try {
       const { taskId, source, type, payload } = req.body;
@@ -217,7 +246,7 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
     }
   });
 
-  // --- Server-Sent Events (SSE) Stream ---
+  // --- Server-Sent Events (SSE) Stream with Durable Replay ---
 
   router.get("/events/stream", (req: Request, res: Response) => {
     res.setHeader("Content-Type", "text/event-stream");
@@ -226,10 +255,38 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
-    res.write(`event: connected\ndata: ${JSON.stringify({ status: "connected", timestamp: new Date().toISOString() })}\n\n`);
+    res.write(
+      `event: connected\ndata: ${JSON.stringify({
+        status: "connected",
+        timestamp: new Date().toISOString(),
+      })}\n\n`
+    );
+
+    // Replay prior events if Last-Event-ID or ?after/?cursor is supplied
+    const afterCursor =
+      (req.headers["last-event-id"] as string) ||
+      (req.query.after as string) ||
+      (req.query.cursor as string);
+
+    if (afterCursor) {
+      try {
+        const replay = coordinator.getEventsReplay(afterCursor);
+        for (const ev of replay.events) {
+          const id = ev.cursor || ev.id;
+          res.write(`id: ${id}\nevent: activity\ndata: ${JSON.stringify(ev)}\n\n`);
+        }
+      } catch (err: any) {
+        if (err && err.code === "CURSOR_EXPIRED") {
+          res.write(`event: reset\ndata: ${JSON.stringify({ reason: "CURSOR_EXPIRED" })}\n\n`);
+          res.end();
+          return;
+        }
+      }
+    }
 
     const unsubscribe = coordinator.subscribe((event) => {
-      res.write(`id: ${event.id}\nevent: activity\ndata: ${JSON.stringify(event)}\n\n`);
+      const id = (event as any).cursor || event.id;
+      res.write(`id: ${id}\nevent: activity\ndata: ${JSON.stringify(event)}\n\n`);
     });
 
     const pingInterval = setInterval(() => {
@@ -246,11 +303,19 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
 
   router.post("/patches", (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { taskId, runId, diffContent, testOutput, patchPath } = req.body;
+      const { taskId, runId, diffContent, testOutput, patchPath, baseCommit, review } = req.body;
       if (!taskId || !runId || !diffContent) {
         throw new ValidationError("taskId, runId, and diffContent are required");
       }
-      const patch = coordinator.proposePatch(taskId, runId, diffContent, testOutput, patchPath);
+      const patch = coordinator.proposePatch(
+        taskId,
+        runId,
+        diffContent,
+        testOutput,
+        patchPath,
+        baseCommit,
+        review
+      );
       res.status(201).json(patch);
     } catch (err) {
       next(err);
@@ -289,7 +354,202 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
     }
   });
 
-  // --- Synchronization Endpoints ---
+  // --- Verified Application Workflow (UD-IC/1.0 Section 6 & 15) ---
+
+  router.post("/patches/:id/apply", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const patchId = String(req.params.id);
+      const reviewerId = (req.body?.reviewerId as string) || "lead-engineer";
+      const {
+        expectedTaskRevision,
+        expectedBaseCommit,
+        expectedDiffHash,
+        targetWorkspaceId,
+        testProfileId,
+      } = req.body;
+
+      if (
+        expectedTaskRevision === undefined ||
+        !expectedBaseCommit ||
+        !expectedDiffHash
+      ) {
+        throw new ValidationError(
+          "expectedTaskRevision, expectedBaseCommit, and expectedDiffHash are required"
+        );
+      }
+
+      const appRecord = coordinator.applyPatch(
+        patchId,
+        {
+          expectedTaskRevision: Number(expectedTaskRevision),
+          expectedBaseCommit: String(expectedBaseCommit),
+          expectedDiffHash: String(expectedDiffHash),
+          targetWorkspaceId: targetWorkspaceId || "integration-target",
+          testProfileId: testProfileId || "default-tests",
+        },
+        reviewerId
+      );
+
+      res.status(202).json(appRecord);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get("/applications/:id", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const appId = String(req.params.id);
+      const appRecord = coordinator.getApplication(appId);
+      res.json(appRecord);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // --- Canonical Gateway Endpoints (UD-IC/1.0 Section 6) ---
+
+  router.post("/sync/push", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { contractVersion, deviceId, events } = req.body;
+      if (contractVersion !== "UD-IC/1.0" || !deviceId || !Array.isArray(events)) {
+        throw new ValidationError(
+          "Invalid push batch format. Expected contractVersion 'UD-IC/1.0', deviceId, and events array."
+        );
+      }
+
+      const principal: Principal = {
+        id: (req.headers["x-principal-id"] as string) || deviceId,
+        deviceId,
+        role: (req.headers["x-principal-role"] as any) || "device",
+      };
+
+      const acks = [];
+      let receivedThrough = 0;
+
+      for (const ev of events) {
+        const ack = await coordinator.process(ev, principal);
+        acks.push(ack);
+        if (
+          ack.status === "applied" ||
+          ack.status === "conflict" ||
+          ack.status === "rejected"
+        ) {
+          receivedThrough = Math.max(receivedThrough, ack.sequence);
+        }
+      }
+
+      res.setHeader("X-UD-Contract", "UD-IC/1.0");
+      res.json({
+        contractVersion: "UD-IC/1.0",
+        acks,
+        receivedThrough,
+        serverTime: new Date().toISOString(),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get("/sync/pull", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const after = req.query.after as string | undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+      const deviceId = (req.headers["x-device-id"] as string) || "anonymous-device";
+      const principal: Principal = {
+        id: deviceId,
+        deviceId,
+        role: "device",
+      };
+
+      const pullResponse = await coordinator.pull(after, limit, principal);
+      res.setHeader("X-UD-Contract", "UD-IC/1.0");
+      res.json(pullResponse);
+    } catch (err: any) {
+      if (err && err.code === "CURSOR_EXPIRED") {
+        res.status(410).json({
+          error: "Gone",
+          code: "CURSOR_EXPIRED",
+          message: err.message || "Cursor has expired",
+          requestId: randomUUID(),
+          retryable: false,
+        });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.get("/sync/conflicts", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      // If UD-IC/1.0 request
+      if (
+        req.headers["x-ud-contract"] === "UD-IC/1.0" ||
+        req.query.contractVersion === "UD-IC/1.0"
+      ) {
+        const status = (req.query.status as "open" | "resolved") || "open";
+        const after = req.query.after as string | undefined;
+        const page = await coordinator.listConflicts(status, after);
+        res.setHeader("X-UD-Contract", "UD-IC/1.0");
+        res.json(page);
+        return;
+      }
+
+      // Fallback to legacy syncEngine if attached
+      if (syncEngine) {
+        const resolvedFilter =
+          req.query.resolved !== undefined
+            ? req.query.resolved === "true"
+            : undefined;
+        res.json(syncEngine.getConflicts(resolvedFilter));
+        return;
+      }
+
+      const page = await coordinator.listConflicts("open");
+      res.json(page);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post(
+    "/sync/conflicts/:id/resolve",
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const conflictId = String(req.params.id);
+
+        if (
+          req.body.expectedConflictRevision !== undefined ||
+          req.headers["x-ud-contract"] === "UD-IC/1.0"
+        ) {
+          const principal: Principal = {
+            id: (req.headers["x-principal-id"] as string) || "reviewer-1",
+            deviceId: (req.headers["x-device-id"] as string) || "reviewer-device",
+            role: (req.headers["x-principal-role"] as any) || "reviewer",
+          };
+          const resolved = await coordinator.resolve(conflictId, req.body, principal);
+          res.setHeader("X-UD-Contract", "UD-IC/1.0");
+          res.json(resolved);
+          return;
+        }
+
+        if (syncEngine) {
+          const { resolution, customPayload } = req.body;
+          if (!resolution) {
+            throw new ValidationError("resolution is required");
+          }
+          syncEngine.resolveConflict(conflictId, resolution, customPayload);
+          res.json({ status: "ok", conflictId, resolution });
+          return;
+        }
+
+        throw new ValidationError("Resolution parameters invalid");
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  // --- Synchronization Endpoints (Legacy Adapter) ---
 
   router.get("/sync/status", (_req: Request, res: Response) => {
     if (!syncEngine) {
@@ -357,34 +617,6 @@ export function createApiRouter(coordinator: CoordinatorService, syncEngine?: Sy
       next(err);
     }
   });
-
-  router.get("/sync/conflicts", (req: Request, res: Response) => {
-    if (!syncEngine) {
-      res.json([]);
-      return;
-    }
-    const resolvedFilter = req.query.resolved !== undefined ? req.query.resolved === "true" : undefined;
-    res.json(syncEngine.getConflicts(resolvedFilter));
-  });
-
-  router.post("/sync/conflicts/:id/resolve", (req: Request, res: Response, next: NextFunction) => {
-    if (!syncEngine) {
-      res.status(400).json({ error: "Sync engine not attached" });
-      return;
-    }
-    try {
-      const conflictId = String(req.params.id);
-      const { resolution, customPayload } = req.body;
-      if (!resolution) {
-        throw new ValidationError("resolution is required");
-      }
-      syncEngine.resolveConflict(conflictId, resolution, customPayload);
-      res.json({ status: "ok", conflictId, resolution });
-    } catch (err) {
-      next(err);
-    }
-  });
-
 
   // --- Frontend Replacement / Handoff Endpoints ---
 

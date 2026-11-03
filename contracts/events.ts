@@ -1,6 +1,6 @@
 /**
  * Canonical Event Contract
- * Protocol Version: 1.0 (Four-Agent Protocol)
+ * Protocol Version: 1.0 (Four-Agent Protocol) / Integration Baseline: UD-IC/1.0
  * Primary Owner: Role 1 — Core Backend & Coordinator
  */
 
@@ -15,4 +15,13 @@ export interface ActivityEvent {
   payload: Record<string, unknown>;
 }
 
-export type EventCallback = (event: ActivityEvent) => void;
+export interface CanonicalEvent extends ActivityEvent {
+  contractVersion: "UD-IC/1.0";
+  cursor: string;
+  coordinatorEpoch: string;
+  originEventId?: string;
+  originDeviceId?: string;
+  originSequence?: number;
+}
+
+export type EventCallback = (event: ActivityEvent | CanonicalEvent) => void;

@@ -1,18 +1,31 @@
 /**
  * SQLite Persistent Storage Engine
- * Role 1 — Core Backend & Coordinator
+ * Role 1 — Core Backend & Coordinator / Architecture: UD-IC/1.0
  * Uses Node.js native DatabaseSync (node:sqlite)
  */
 
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import type { Task, TaskStatus } from "../../contracts/task.ts";
-import type { ActivityEvent } from "../../contracts/events.ts";
+import { randomUUID } from "node:crypto";
+import type {
+  Task,
+  TaskStatus,
+  PatchRecordV1,
+  RunRecord,
+  ApplicationRecord,
+  Checkpoint,
+  TestEvidence,
+} from "../../contracts/task.ts";
+import type { ActivityEvent, CanonicalEvent } from "../../contracts/events.ts";
 import type { AgentInfo } from "../../contracts/agent.ts";
 import type { SyncEvent, ConflictRecord } from "../../contracts/sync.ts";
 import type { Project } from "../../contracts/project.ts";
 import type { StructuredHandoff } from "../../contracts/handoff.ts";
+import type {
+  Ack,
+  ConflictRecordV1,
+} from "../core/syncGateway.ts";
 
 export interface OutboxItem {
   id: string;
@@ -38,10 +51,16 @@ export interface PatchRecord {
   reviewedAt?: string;
   reviewerId?: string;
   rejectionReason?: string;
+  baseCommit?: string;
+  taskRevision?: number;
+  diffHash?: string;
+  applicationStatus?: "not_applied" | "queued" | "applying" | "verified" | "failed" | "blocked";
+  applicationId?: string;
 }
 
 export class CoordinatorDatabase {
   private db: DatabaseSync;
+  private coordinatorEpoch: string = "";
 
   constructor(dbPath: string = ":memory:") {
     if (dbPath !== ":memory:") {
@@ -54,10 +73,33 @@ export class CoordinatorDatabase {
     this.initializeSchema();
   }
 
+  public transaction<T>(fn: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE;");
+    try {
+      const res = fn();
+      this.db.exec("COMMIT;");
+      return res;
+    } catch (err) {
+      try {
+        this.db.exec("ROLLBACK;");
+      } catch (_) {}
+      throw err;
+    }
+  }
+
+  public getCoordinatorEpoch(): string {
+    return this.coordinatorEpoch;
+  }
+
   private initializeSchema(): void {
     this.db.exec("PRAGMA foreign_keys = ON;");
 
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS system_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS tasks (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -173,7 +215,136 @@ export class CoordinatorDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_handoffs_to ON handoffs(to_agent);
       CREATE INDEX IF NOT EXISTS idx_handoffs_task ON handoffs(task_id);
+
+      -- UD-IC/1.0 Canonical Gateway, Conflict, and Journal Tables --
+      CREATE TABLE IF NOT EXISTS coordinator_inbox (
+        event_id TEXT PRIMARY KEY,
+        device_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        payload_hash TEXT NOT NULL,
+        status TEXT NOT NULL,
+        outcome_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_inbox_device_seq ON coordinator_inbox(device_id, sequence);
+
+      CREATE TABLE IF NOT EXISTS device_progress (
+        device_id TEXT PRIMARY KEY,
+        last_sequence INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS canonical_journal (
+        cursor INTEGER PRIMARY KEY AUTOINCREMENT,
+        epoch TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        event_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_journal_epoch_cursor ON canonical_journal(epoch, cursor);
+
+      CREATE TABLE IF NOT EXISTS conflicts_v1 (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        base_revision INTEGER NOT NULL,
+        current_revision INTEGER NOT NULL,
+        proposed_json TEXT NOT NULL,
+        current_task_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        resolution_revision INTEGER NOT NULL DEFAULT 1,
+        detected_at TEXT NOT NULL,
+        resolved_at TEXT,
+        resolved_by TEXT,
+        resolution TEXT,
+        resulting_task_revision INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_conflicts_v1_status ON conflicts_v1(status);
+
+      CREATE TABLE IF NOT EXISTS runs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        base_revision INTEGER NOT NULL,
+        workspace_id TEXT NOT NULL,
+        base_commit TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        status TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        max_attempts INTEGER NOT NULL,
+        cancellation_requested INTEGER NOT NULL DEFAULT 0,
+        patch_id TEXT,
+        evidence_json TEXT,
+        error_json TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        ended_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS applications (
+        id TEXT PRIMARY KEY,
+        patch_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        expected_base_commit TEXT NOT NULL,
+        target_workspace_id TEXT NOT NULL,
+        diff_hash TEXT NOT NULL,
+        requested_by TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        started_at TEXT,
+        ended_at TEXT,
+        commit_hash TEXT,
+        evidence_json TEXT,
+        error_json TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS checkpoints (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        base_commit TEXT NOT NULL,
+        task_revision INTEGER NOT NULL,
+        stage TEXT NOT NULL,
+        artifact_hash TEXT,
+        summary TEXT NOT NULL,
+        recovery_capability TEXT NOT NULL DEFAULT 'metadata_only',
+        created_at TEXT NOT NULL
+      );
     `);
+
+    // Ensure additive columns in patches
+    const patchCols = this.db.prepare("PRAGMA table_info(patches)").all() as { name: string }[];
+    const names = new Set(patchCols.map((c) => c.name));
+    if (!names.has("base_commit")) {
+      this.db.exec("ALTER TABLE patches ADD COLUMN base_commit TEXT;");
+    }
+    if (!names.has("task_revision")) {
+      this.db.exec("ALTER TABLE patches ADD COLUMN task_revision INTEGER;");
+    }
+    if (!names.has("diff_hash")) {
+      this.db.exec("ALTER TABLE patches ADD COLUMN diff_hash TEXT;");
+    }
+    if (!names.has("review_json")) {
+      this.db.exec("ALTER TABLE patches ADD COLUMN review_json TEXT;");
+    }
+    if (!names.has("application_status")) {
+      this.db.exec("ALTER TABLE patches ADD COLUMN application_status TEXT DEFAULT 'not_applied';");
+    }
+    if (!names.has("application_id")) {
+      this.db.exec("ALTER TABLE patches ADD COLUMN application_id TEXT;");
+    }
+
+    // Initialize epoch
+    const epochRow = this.db.prepare("SELECT value FROM system_meta WHERE key = 'coordinator_epoch'").get() as { value: string } | undefined;
+    if (!epochRow) {
+      const newEpoch = `epoch-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+      this.db.prepare("INSERT INTO system_meta (key, value) VALUES ('coordinator_epoch', ?)").run(newEpoch);
+      this.coordinatorEpoch = newEpoch;
+    } else {
+      this.coordinatorEpoch = epochRow.value;
+    }
   }
 
   // --- Task Operations ---
@@ -362,11 +533,12 @@ export class CoordinatorDatabase {
 
   // --- Patch Operations ---
 
-  public savePatch(patch: PatchRecord): void {
+  public savePatch(patch: PatchRecord | PatchRecordV1): void {
     const stmt = this.db.prepare(`
-      INSERT INTO patches (id, task_id, run_id, status, patch_path, diff_content, test_output, created_at, reviewed_at, reviewer_id, rejection_reason)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO patches (id, task_id, run_id, status, patch_path, diff_content, test_output, created_at, reviewed_at, reviewer_id, rejection_reason, base_commit, task_revision, diff_hash, review_json, application_status, application_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+    const p1 = patch as PatchRecordV1;
     stmt.run(
       patch.id,
       patch.taskId,
@@ -378,7 +550,13 @@ export class CoordinatorDatabase {
       patch.createdAt,
       patch.reviewedAt || null,
       patch.reviewerId || null,
-      patch.rejectionReason || null
+      patch.rejectionReason || null,
+      p1.baseCommit || null,
+      p1.taskRevision || null,
+      p1.diffHash || null,
+      p1.review ? JSON.stringify(p1.review) : null,
+      p1.applicationStatus || "not_applied",
+      p1.applicationId || null
     );
   }
 
@@ -386,7 +564,9 @@ export class CoordinatorDatabase {
     const stmt = this.db.prepare(`
       SELECT id, task_id as taskId, run_id as runId, status, patch_path as patchPath,
              diff_content as diffContent, test_output as testOutput, created_at as createdAt,
-             reviewed_at as reviewedAt, reviewer_id as reviewerId, rejection_reason as rejectionReason
+             reviewed_at as reviewedAt, reviewer_id as reviewerId, rejection_reason as rejectionReason,
+             base_commit as baseCommit, task_revision as taskRevision, diff_hash as diffHash,
+             application_status as applicationStatus, application_id as applicationId
       FROM patches
       WHERE id = ?
     `);
@@ -395,11 +575,43 @@ export class CoordinatorDatabase {
     return this.mapPatch(row);
   }
 
+  public getPatchV1(id: string): PatchRecordV1 | null {
+    const stmt = this.db.prepare(`
+      SELECT id, task_id as taskId, run_id as runId, status, patch_path as patchPath,
+             diff_content as diffContent, test_output as testOutput, created_at as createdAt,
+             reviewed_at as reviewedAt, reviewer_id as reviewerId, rejection_reason as rejectionReason,
+             base_commit as baseCommit, task_revision as taskRevision, diff_hash as diffHash,
+             review_json as reviewJson, application_status as applicationStatus, application_id as applicationId
+      FROM patches
+      WHERE id = ?
+    `);
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.mapPatchV1(row);
+  }
+
+  public listPatchesByTaskId(taskId: string): PatchRecordV1[] {
+    const stmt = this.db.prepare(`
+      SELECT id, task_id as taskId, run_id as runId, status, patch_path as patchPath,
+             diff_content as diffContent, test_output as testOutput, created_at as createdAt,
+             reviewed_at as reviewedAt, reviewer_id as reviewerId, rejection_reason as rejectionReason,
+             base_commit as baseCommit, task_revision as taskRevision, diff_hash as diffHash,
+             review_json as reviewJson, application_status as applicationStatus, application_id as applicationId
+      FROM patches
+      WHERE task_id = ?
+      ORDER BY created_at ASC
+    `);
+    const rows = stmt.all(taskId) as Record<string, unknown>[];
+    return rows.map((r) => this.mapPatchV1(r));
+  }
+
   public getPatchByTaskId(taskId: string): PatchRecord | null {
     const stmt = this.db.prepare(`
       SELECT id, task_id as taskId, run_id as runId, status, patch_path as patchPath,
              diff_content as diffContent, test_output as testOutput, created_at as createdAt,
-             reviewed_at as reviewedAt, reviewer_id as reviewerId, rejection_reason as rejectionReason
+             reviewed_at as reviewedAt, reviewer_id as reviewerId, rejection_reason as rejectionReason,
+             base_commit as baseCommit, task_revision as taskRevision, diff_hash as diffHash,
+             application_status as applicationStatus, application_id as applicationId
       FROM patches
       WHERE task_id = ?
       ORDER BY created_at DESC
@@ -430,7 +642,392 @@ export class CoordinatorDatabase {
     return this.getPatch(id);
   }
 
-  // --- Sync & Outbox Operations ---
+  public updatePatchApplication(
+    id: string,
+    applicationStatus: "not_applied" | "queued" | "applying" | "verified" | "failed" | "blocked",
+    applicationId?: string
+  ): void {
+    const stmt = this.db.prepare(`
+      UPDATE patches
+      SET application_status = ?, application_id = ?
+      WHERE id = ?
+    `);
+    stmt.run(applicationStatus, applicationId || null, id);
+  }
+
+  // --- UD-IC/1.0 Inbox & Outcome Operations ---
+
+  public getInboxEntry(eventId: string): { eventId: string; deviceId: string; sequence: number; payloadHash: string; status: string; outcome: Ack } | null {
+    const stmt = this.db.prepare(`
+      SELECT event_id as eventId, device_id as deviceId, sequence, payload_hash as payloadHash, status, outcome_json as outcomeJson
+      FROM coordinator_inbox WHERE event_id = ?
+    `);
+    const row = stmt.get(eventId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      eventId: String(row.eventId),
+      deviceId: String(row.deviceId),
+      sequence: Number(row.sequence),
+      payloadHash: String(row.payloadHash),
+      status: String(row.status),
+      outcome: JSON.parse(String(row.outcomeJson)) as Ack,
+    };
+  }
+
+  public saveInboxEntry(
+    eventId: string,
+    deviceId: string,
+    sequence: number,
+    payloadHash: string,
+    status: string,
+    outcome: Ack
+  ): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO coordinator_inbox (event_id, device_id, sequence, payload_hash, status, outcome_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(eventId, deviceId, sequence, payloadHash, status, JSON.stringify(outcome), new Date().toISOString());
+  }
+
+  public getDeviceLastSequence(deviceId: string): number {
+    const stmt = this.db.prepare("SELECT last_sequence as lastSequence FROM device_progress WHERE device_id = ?");
+    const row = stmt.get(deviceId) as { lastSequence: number } | undefined;
+    return row ? Number(row.lastSequence) : 0;
+  }
+
+  public setDeviceLastSequence(deviceId: string, sequence: number): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO device_progress (device_id, last_sequence, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(device_id) DO UPDATE SET last_sequence = excluded.last_sequence, updated_at = excluded.updated_at
+    `);
+    stmt.run(deviceId, sequence, new Date().toISOString());
+  }
+
+  // --- Canonical Journal Operations ---
+
+  public appendCanonicalEvent(event: CanonicalEvent): string {
+    const stmt = this.db.prepare(`
+      INSERT INTO canonical_journal (epoch, event_id, event_json, created_at)
+      VALUES (?, ?, ?, ?)
+    `);
+    const result = stmt.run(this.coordinatorEpoch, event.id, JSON.stringify(event), event.timestamp);
+    const cursorId = Number(result.lastInsertRowid);
+    const cursor = `${this.coordinatorEpoch}:${cursorId}`;
+    event.cursor = cursor;
+    event.coordinatorEpoch = this.coordinatorEpoch;
+
+    this.db.prepare("UPDATE canonical_journal SET event_json = ? WHERE cursor = ?").run(JSON.stringify(event), cursorId);
+    return cursor;
+  }
+
+  public pullJournal(afterCursor: string | undefined, limit: number): { events: CanonicalEvent[]; nextCursor: string; hasMore: boolean } {
+    const effectiveLimit = Math.min(Math.max(limit || 100, 1), 200);
+    let afterCursorNum = 0;
+    if (afterCursor) {
+      const parts = afterCursor.split(":");
+      if (parts.length === 2) {
+        if (parts[0] !== this.coordinatorEpoch) {
+          const err = new Error("Cursor belongs to expired or different epoch");
+          (err as any).code = "CURSOR_EXPIRED";
+          throw err;
+        }
+        afterCursorNum = parseInt(parts[1], 10) || 0;
+      }
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT cursor, event_json as eventJson
+      FROM canonical_journal
+      WHERE epoch = ? AND cursor > ?
+      ORDER BY cursor ASC
+      LIMIT ?
+    `);
+    const rows = stmt.all(this.coordinatorEpoch, afterCursorNum, effectiveLimit + 1) as { cursor: number; eventJson: string }[];
+    const hasMore = rows.length > effectiveLimit;
+    const items = hasMore ? rows.slice(0, effectiveLimit) : rows;
+    const events: CanonicalEvent[] = items.map((r) => JSON.parse(r.eventJson));
+
+    const lastCursorNum = items.length > 0 ? items[items.length - 1].cursor : afterCursorNum;
+    const nextCursor = `${this.coordinatorEpoch}:${lastCursorNum}`;
+
+    return { events, nextCursor, hasMore };
+  }
+
+  // --- Conflicts V1 Operations ---
+
+  public saveConflictV1(c: ConflictRecordV1): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO conflicts_v1 (id, task_id, event_id, device_id, base_revision, current_revision, proposed_json, current_task_json, status, resolution_revision, detected_at, resolved_at, resolved_by, resolution, resulting_task_revision)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      c.id,
+      c.taskId,
+      c.eventId,
+      c.deviceId,
+      c.baseRevision,
+      c.currentRevision,
+      JSON.stringify(c.proposed),
+      JSON.stringify(c.currentTask),
+      c.status,
+      c.resolutionRevision,
+      c.detectedAt,
+      c.resolvedAt || null,
+      c.resolvedBy || null,
+      c.resolution || null,
+      c.resultingTaskRevision || null
+    );
+  }
+
+  public getConflictV1(id: string): ConflictRecordV1 | null {
+    const stmt = this.db.prepare(`
+      SELECT id, task_id as taskId, event_id as eventId, device_id as deviceId, base_revision as baseRevision,
+             current_revision as currentRevision, proposed_json as proposedJson, current_task_json as currentTaskJson,
+             status, resolution_revision as resolutionRevision, detected_at as detectedAt, resolved_at as resolvedAt,
+             resolved_by as resolvedBy, resolution, resulting_task_revision as resultingTaskRevision
+      FROM conflicts_v1 WHERE id = ?
+    `);
+    const r = stmt.get(id) as Record<string, unknown> | undefined;
+    if (!r) return null;
+    return this.mapConflictV1(r);
+  }
+
+  public listConflictsV1(status: "open" | "resolved" = "open", after?: string, limit: number = 100): ConflictRecordV1[] {
+    let sql = `
+      SELECT id, task_id as taskId, event_id as eventId, device_id as deviceId, base_revision as baseRevision,
+             current_revision as currentRevision, proposed_json as proposedJson, current_task_json as currentTaskJson,
+             status, resolution_revision as resolutionRevision, detected_at as detectedAt, resolved_at as resolvedAt,
+             resolved_by as resolvedBy, resolution, resulting_task_revision as resultingTaskRevision
+      FROM conflicts_v1 WHERE status = ?
+    `;
+    const params: (string | number)[] = [status];
+    if (after) {
+      sql += ` AND id > ?`;
+      params.push(after);
+    }
+    sql += ` ORDER BY detected_at DESC LIMIT ?`;
+    params.push(limit);
+
+    const rows = this.db.prepare(sql).all(...params) as Record<string, unknown>[];
+    return rows.map((r) => this.mapConflictV1(r));
+  }
+
+  public updateConflictV1Resolution(
+    id: string,
+    resolutionRevision: number,
+    resolvedBy: string,
+    resolution: "keep_authoritative" | "retry_proposal" | "custom_transition",
+    resultingTaskRevision?: number
+  ): boolean {
+    const now = new Date().toISOString();
+    const stmt = this.db.prepare(`
+      UPDATE conflicts_v1
+      SET status = 'resolved', resolution_revision = ?, resolved_at = ?, resolved_by = ?, resolution = ?, resulting_task_revision = ?
+      WHERE id = ?
+    `);
+    const result = stmt.run(resolutionRevision, now, resolvedBy, resolution, resultingTaskRevision || null, id);
+    return result.changes > 0;
+  }
+
+  // --- Runs Operations ---
+
+  public saveRun(run: RunRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO runs (id, task_id, base_revision, workspace_id, base_commit, provider, status, stage, attempts, max_attempts, cancellation_requested, patch_id, evidence_json, error_json, created_at, started_at, ended_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      run.id,
+      run.taskId,
+      run.baseRevision,
+      run.workspaceId,
+      run.baseCommit,
+      run.provider,
+      run.status,
+      run.stage,
+      run.attempts,
+      run.maxAttempts,
+      run.cancellationRequested ? 1 : 0,
+      run.patchId || null,
+      JSON.stringify(run.evidence || []),
+      run.error ? JSON.stringify(run.error) : null,
+      run.createdAt,
+      run.startedAt || null,
+      run.endedAt || null
+    );
+  }
+
+  public getRun(id: string): RunRecord | null {
+    const stmt = this.db.prepare(`
+      SELECT id, task_id as taskId, base_revision as baseRevision, workspace_id as workspaceId,
+             base_commit as baseCommit, provider, status, stage, attempts, max_attempts as maxAttempts,
+             cancellation_requested as cancellationRequested, patch_id as patchId,
+             evidence_json as evidenceJson, error_json as errorJson, created_at as createdAt,
+             started_at as startedAt, ended_at as endedAt
+      FROM runs WHERE id = ?
+    `);
+    const r = stmt.get(id) as Record<string, unknown> | undefined;
+    if (!r) return null;
+    return {
+      id: String(r.id),
+      taskId: String(r.taskId),
+      baseRevision: Number(r.baseRevision),
+      workspaceId: String(r.workspaceId),
+      baseCommit: String(r.baseCommit),
+      provider: r.provider as RunRecord["provider"],
+      status: r.status as RunRecord["status"],
+      stage: r.stage as RunRecord["stage"],
+      attempts: Number(r.attempts),
+      maxAttempts: Number(r.maxAttempts),
+      cancellationRequested: Boolean(r.cancellationRequested),
+      patchId: r.patchId ? String(r.patchId) : undefined,
+      evidence: JSON.parse(String(r.evidenceJson || "[]")) as TestEvidence[],
+      error: r.errorJson ? JSON.parse(String(r.errorJson)) : undefined,
+      createdAt: String(r.createdAt),
+      startedAt: r.startedAt ? String(r.startedAt) : undefined,
+      endedAt: r.endedAt ? String(r.endedAt) : undefined,
+    };
+  }
+
+  public updateRun(run: RunRecord): void {
+    const stmt = this.db.prepare(`
+      UPDATE runs
+      SET status = ?, stage = ?, attempts = ?, cancellation_requested = ?,
+          patch_id = ?, evidence_json = ?, error_json = ?, started_at = ?, ended_at = ?
+      WHERE id = ?
+    `);
+    stmt.run(
+      run.status,
+      run.stage,
+      run.attempts,
+      run.cancellationRequested ? 1 : 0,
+      run.patchId || null,
+      JSON.stringify(run.evidence || []),
+      run.error ? JSON.stringify(run.error) : null,
+      run.startedAt || null,
+      run.endedAt || null,
+      run.id
+    );
+  }
+
+  // --- Applications Operations ---
+
+  public saveApplication(app: ApplicationRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO applications (id, patch_id, task_id, status, expected_base_commit, target_workspace_id, diff_hash, requested_by, requested_at, started_at, ended_at, commit_hash, evidence_json, error_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      app.id,
+      app.patchId,
+      app.taskId,
+      app.status,
+      app.expectedBaseCommit,
+      app.targetWorkspaceId,
+      app.diffHash,
+      app.requestedBy,
+      app.requestedAt,
+      app.startedAt || null,
+      app.endedAt || null,
+      app.commit || null,
+      JSON.stringify(app.evidence || []),
+      app.error ? JSON.stringify(app.error) : null
+    );
+  }
+
+  public getApplication(id: string): ApplicationRecord | null {
+    const stmt = this.db.prepare(`
+      SELECT id, patch_id as patchId, task_id as taskId, status, expected_base_commit as expectedBaseCommit,
+             target_workspace_id as targetWorkspaceId, diff_hash as diffHash, requested_by as requestedBy,
+             requested_at as requestedAt, started_at as startedAt, ended_at as endedAt,
+             commit_hash as commitHash, evidence_json as evidenceJson, error_json as errorJson
+      FROM applications WHERE id = ?
+    `);
+    const r = stmt.get(id) as Record<string, unknown> | undefined;
+    if (!r) return null;
+    return {
+      id: String(r.id),
+      patchId: String(r.patchId),
+      taskId: String(r.taskId),
+      status: r.status as ApplicationRecord["status"],
+      expectedBaseCommit: String(r.expectedBaseCommit),
+      targetWorkspaceId: String(r.targetWorkspaceId),
+      diffHash: String(r.diffHash),
+      requestedBy: String(r.requestedBy),
+      requestedAt: String(r.requestedAt),
+      startedAt: r.startedAt ? String(r.startedAt) : undefined,
+      endedAt: r.endedAt ? String(r.endedAt) : undefined,
+      commit: r.commitHash ? String(r.commitHash) : undefined,
+      evidence: JSON.parse(String(r.evidenceJson || "[]")) as TestEvidence[],
+      error: r.errorJson ? JSON.parse(String(r.errorJson)) : undefined,
+    };
+  }
+
+  public updateApplication(app: ApplicationRecord): void {
+    const stmt = this.db.prepare(`
+      UPDATE applications
+      SET status = ?, started_at = ?, ended_at = ?, commit_hash = ?, evidence_json = ?, error_json = ?
+      WHERE id = ?
+    `);
+    stmt.run(
+      app.status,
+      app.startedAt || null,
+      app.endedAt || null,
+      app.commit || null,
+      JSON.stringify(app.evidence || []),
+      app.error ? JSON.stringify(app.error) : null,
+      app.id
+    );
+  }
+
+  // --- Checkpoints Operations ---
+
+  public saveCheckpoint(cp: Checkpoint): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO checkpoints (id, task_id, run_id, device_id, base_commit, task_revision, stage, artifact_hash, summary, recovery_capability, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      cp.id,
+      cp.taskId,
+      cp.runId,
+      cp.deviceId,
+      cp.baseCommit,
+      cp.taskRevision,
+      cp.stage,
+      cp.artifactHash || null,
+      cp.summary,
+      cp.recoveryCapability,
+      cp.createdAt
+    );
+  }
+
+  public listCheckpoints(taskId: string): Checkpoint[] {
+    const stmt = this.db.prepare(`
+      SELECT id, task_id as taskId, run_id as runId, device_id as deviceId, base_commit as baseCommit,
+             task_revision as taskRevision, stage, artifact_hash as artifactHash, summary,
+             recovery_capability as recoveryCapability, created_at as createdAt
+      FROM checkpoints WHERE task_id = ?
+      ORDER BY created_at ASC
+    `);
+    const rows = stmt.all(taskId) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: String(r.id),
+      taskId: String(r.taskId),
+      runId: String(r.runId),
+      deviceId: String(r.deviceId),
+      baseCommit: String(r.baseCommit),
+      taskRevision: Number(r.taskRevision),
+      stage: String(r.stage),
+      artifactHash: r.artifactHash ? String(r.artifactHash) : undefined,
+      summary: String(r.summary),
+      recoveryCapability: "metadata_only" as const,
+      createdAt: String(r.createdAt),
+    }));
+  }
+
+  // --- Sync & Outbox Operations (Legacy) ---
 
   public saveOutboxItem(item: OutboxItem): void {
     const stmt = this.db.prepare(`
@@ -650,6 +1247,60 @@ export class CoordinatorDatabase {
       reviewedAt: row.reviewedAt ? String(row.reviewedAt) : undefined,
       reviewerId: row.reviewerId ? String(row.reviewerId) : undefined,
       rejectionReason: row.rejectionReason ? String(row.rejectionReason) : undefined,
+      baseCommit: row.baseCommit ? String(row.baseCommit) : undefined,
+      taskRevision: row.taskRevision ? Number(row.taskRevision) : undefined,
+      diffHash: row.diffHash ? String(row.diffHash) : undefined,
+      applicationStatus: (row.applicationStatus as any) || "not_applied",
+      applicationId: row.applicationId ? String(row.applicationId) : undefined,
+    };
+  }
+
+  private mapPatchV1(row: Record<string, unknown>): PatchRecordV1 {
+    let review;
+    if (row.reviewJson) {
+      try {
+        review = JSON.parse(String(row.reviewJson));
+      } catch {}
+    }
+    return {
+      id: String(row.id),
+      taskId: String(row.taskId),
+      runId: String(row.runId),
+      status: row.status as PatchRecordV1["status"],
+      patchPath: row.patchPath ? String(row.patchPath) : undefined,
+      diffContent: String(row.diffContent),
+      testOutput: row.testOutput ? String(row.testOutput) : undefined,
+      createdAt: String(row.createdAt),
+      reviewedAt: row.reviewedAt ? String(row.reviewedAt) : undefined,
+      reviewerId: row.reviewerId ? String(row.reviewerId) : undefined,
+      rejectionReason: row.rejectionReason ? String(row.rejectionReason) : undefined,
+      baseCommit: row.baseCommit ? String(row.baseCommit) : undefined,
+      taskRevision: row.taskRevision ? Number(row.taskRevision) : undefined,
+      diffHash: row.diffHash ? String(row.diffHash) : undefined,
+      review,
+      applicationStatus: (row.applicationStatus as any) || "not_applied",
+      applicationId: row.applicationId ? String(row.applicationId) : undefined,
+    };
+  }
+
+  private mapConflictV1(row: Record<string, unknown>): ConflictRecordV1 {
+    return {
+      contractVersion: "UD-IC/1.0",
+      id: String(row.id),
+      taskId: String(row.taskId),
+      eventId: String(row.eventId),
+      deviceId: String(row.deviceId),
+      baseRevision: Number(row.baseRevision),
+      currentRevision: Number(row.currentRevision),
+      proposed: JSON.parse(String(row.proposedJson)),
+      currentTask: JSON.parse(String(row.currentTaskJson)),
+      status: row.status as ConflictRecordV1["status"],
+      resolutionRevision: Number(row.resolutionRevision),
+      detectedAt: String(row.detectedAt),
+      resolvedAt: row.resolvedAt ? String(row.resolvedAt) : undefined,
+      resolvedBy: row.resolvedBy ? String(row.resolvedBy) : undefined,
+      resolution: row.resolution as ConflictRecordV1["resolution"],
+      resultingTaskRevision: row.resultingTaskRevision ? Number(row.resultingTaskRevision) : undefined,
     };
   }
 
@@ -762,4 +1413,3 @@ export class CoordinatorDatabase {
     });
   }
 }
-

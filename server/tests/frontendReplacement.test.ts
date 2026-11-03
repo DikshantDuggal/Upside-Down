@@ -50,7 +50,7 @@ async function runReplacementTests() {
   try {
     const statusRes = await fetch(`${baseUrl}/frontend/status`);
     if (!statusRes.ok) throw new Error(`/api/frontend/status returned status ${statusRes.status}`);
-    const statusData = await statusRes.json();
+    const statusData = (await statusRes.json()) as any;
     if (statusData.activeFrontend !== "demo") {
       throw new Error(`API returned active frontend '${statusData.activeFrontend}', expected 'demo'`);
     }
@@ -150,3 +150,4 @@ runReplacementTests().catch((err) => {
   console.error("\n❌ FRONTEND REPLACEMENT TESTS FAILED:", err);
   process.exit(1);
 });
+
