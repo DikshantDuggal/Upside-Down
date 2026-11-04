@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {CoordinationCache} from './cache.ts';
-import {GitHubTransport,type GitHubApi} from './transport.ts';
+import {GitHubTransport,GitHubError,type GitHubApi} from './transport.ts';
 import {VERSION,canonical,manifestBody,parseManifest,parse,message,validateWorkspace,repoName,login,validateMessage,type Workspace,type AgentMessage,type RemoteComment,type TaskSpec} from './protocol.ts';
 import {reduce,type Snapshot,type PrEvidence} from './reducer.ts';
 const same=(a:string,b:string)=>a.toLowerCase()===b.toLowerCase();
@@ -64,7 +64,10 @@ export class GitHubCoordination {
   const comments=[...rootComments];for(const issue of issues){check();const taskIssue=(await transport.read<any>(`/repos/${repo}/issues/${issue}`)).data;if(taskIssue.pull_request)throw new Error('Task references a PR instead of issue');comments.push(...(await transport.receive(issue)).comments);}
   check();let snapshot=reduce(workspace,record.issue,comments);const evidence:Record<string,PrEvidence>={};
   for(const task of snapshot.tasks){check();if(task.submission)evidence[task.submission.id]=await this.inspectPr(transport,workspace,task.id,task.assignee,task.branch,task.submission);}
-  snapshot=reduce(workspace,record.issue,comments,evidence);check();const previous=this.cache.get<Snapshot>('snapshot:'+this.key(repo,projectId));snapshot.removedSourceIds=previous?.messages.filter(m=>!comments.some(c=>c.id===m.sourceId)).map(m=>m.sourceId)??[];
+  snapshot=reduce(workspace,record.issue,comments,evidence);check();
+  const openPrs=await transport.pages<any>(`/repos/${repo}/pulls?state=open`);check();
+  for(const task of snapshot.tasks)task.discoveredPrs=openPrs.filter(pr=>pr.user?.id===workspace.members.find(member=>same(member.login,task.assignee))?.id&&same(pr.user.login,task.assignee)&&pr.head?.ref===task.branch&&pr.base?.ref===workspace.baseBranch&&pr.head?.repo?.full_name===repo).map(pr=>({number:pr.number,url:pr.html_url,headSha:pr.head.sha}));
+  const previous=this.cache.get<Snapshot>('snapshot:'+this.key(repo,projectId));snapshot.removedSourceIds=previous?.messages.filter(m=>!comments.some(c=>c.id===m.sourceId)).map(m=>m.sourceId)??[];
   // Single atomic checkpoint after complete remote reads and deliberate handling.
   this.cache.transaction(()=>{this.cache.set('snapshot:'+this.key(repo,projectId),snapshot);this.cache.set('cursor:'+this.key(repo,projectId),{lastCommentId:snapshot.cursor,processedAt:snapshot.refreshedAt});});return snapshot;
  });}
@@ -88,7 +91,8 @@ export class GitHubCoordination {
   return this.send(repo,id,m);
  }
  async inspectPr(transport:GitHubTransport,workspace:Workspace,taskId:string,assignee:string,branch:string,submission:AgentMessage):Promise<PrEvidence>{
-  const number=Number(submission.payload.prNumber),pr=(await transport.read<any>(`/repos/${workspace.repo}/pulls/${number}`)).data;
+  const number=Number(submission.payload.prNumber);let pr:any;
+  try{pr=(await transport.read<any>(`/repos/${workspace.repo}/pulls/${number}`)).data;}catch(error){if(!(error instanceof GitHubError)||error.status!==404)throw error;return {number,url:`https://github.com/${workspace.repo}/pull/${number}`,author:'unknown',branch:'unknown',headSha:String(submission.payload.commitHash),state:'unavailable',merged:false,files:[],reviews:[],checks:[],ci:'not_configured',valid:false,problems:['Pull request unavailable or inaccessible; submission remains unverified']};}
   const fileRecords=await transport.pages<any>(`/repos/${workspace.repo}/pulls/${number}/files`),files=fileRecords.flatMap(f=>[f.filename,...(f.previous_filename?[f.previous_filename]:[])] as string[]),commits=await transport.pages<any>(`/repos/${workspace.repo}/pulls/${number}/commits`),reviews=await transport.pages<any>(`/repos/${workspace.repo}/pulls/${number}/reviews`);
   const checkRuns:any[]=[];let checkPage:any;for(let page=1;page<=20;page++){
    const result=await transport.read<any>(`/repos/${workspace.repo}/commits/${pr.head.sha}/check-runs?per_page=100&page=${page}`);checkPage=result.data;

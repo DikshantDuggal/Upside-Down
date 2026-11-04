@@ -20,7 +20,7 @@ try{
  const text='LIVE-BROWSER-TEST '+new Date().toISOString()+': host GitHub message and retry acceptance; no AI execution claimed.';
  await page.getByLabel('Message type',{exact:true}).selectOption('HOST_MESSAGE');await page.getByLabel('Task',{exact:true}).selectOption('');await page.getByLabel('Recipient',{exact:true}).selectOption('all');await page.getByLabel('Validated payload (JSON)',{exact:true}).fill(JSON.stringify({text}));await page.getByRole('button',{name:'Post GitHub message',exact:true}).click();
  await expect(page.getByRole('button',{name:'Retry original saved message',exact:true})).toBeVisible({timeout:65000});
- await page.getByRole('button',{name:'Retry original saved message',exact:true}).click();await expect(page.getByRole('button',{name:'Retry original saved message',exact:true})).toHaveCount(0,{timeout:65000});await expect(page.getByText(text,{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Retry original saved message',exact:true}).click();await expect(page.getByRole('button',{name:'Retry original saved message',exact:true})).toHaveCount(0,{timeout:65000});await expect(page.getByText(text,{exact:true})).toBeVisible({timeout:65000});
  await page.unroute('**/api/github/send');
  const snapshot=await page.evaluate(async()=>{const response=await fetch('/api/github/state?repo=DikshantDuggal%2FUpside-Down&projectId=phase5-acceptance-20261104');return response.json();});
  const matches=snapshot.messages.filter(m=>m.payload.text===text);assert.equal(matches.length,1);assert.equal(matches[0].author,'DikshantDuggal');

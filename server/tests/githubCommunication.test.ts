@@ -148,6 +148,10 @@ class MockGitHubApi implements GitHubApi {
       return { status: 201, headers: {}, data: comment as unknown as T };
     }
 
+    if (endpoint.includes('/pulls?') && method === 'GET') {
+      return {status:200, headers:{}, data:this.pulls as unknown as T};
+    }
+
     // Pull request inspect endpoints
     const prMatch = endpoint.match(/\/pulls\/(\d+)$/);
     if (prMatch && method === "GET") {

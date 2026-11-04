@@ -19,6 +19,7 @@ export class FakeGitHub implements GitHubApi {
    else if(route==='/repos/acme/demo/issues')data=page(this.issues);
    else if(/\/issues\/\d+\/comments$/.test(route))data=page(this.comments.filter(c=>c.issue===Number(route.split('/').at(-2))));
    else if(/\/issues\/\d+$/.test(route)){data=this.issues.find(i=>i.number===Number(route.split('/').at(-1)));if(!data)throw new GitHubError('Missing issue',404);}
+   else if(route==='/repos/acme/demo/pulls')data=page([]);
    else if(/\/pulls\/\d+\/files$/.test(route))data=page(this.files.map(filename=>({filename})));
    else if(/\/pulls\/\d+\/commits$/.test(route))data=[{sha:this.prHead}];
    else if(/\/pulls\/\d+\/reviews$/.test(route))data=[];
