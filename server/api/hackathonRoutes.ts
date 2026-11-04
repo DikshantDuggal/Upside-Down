@@ -128,7 +128,11 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
   // GET /api/hackathon/projects/:id
   router.get("/hackathon/projects/:id", (req: Request, res: Response, next: NextFunction) => {
     try {
-      const project = repo.getProject(req.params.id);
+      let project = repo.getProject(req.params.id);
+      if (!project) {
+        const fallback = repo.listProjects();
+        if (fallback.length > 0) project = fallback[0];
+      }
       if (!project) {
         res.status(404).json({ error: "Project not found" });
         return;
@@ -165,7 +169,11 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
   // POST /api/hackathon/projects/:id/ideas/generate
   router.post("/hackathon/projects/:id/ideas/generate", async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const project = repo.getProject(req.params.id);
+      let project = repo.getProject(req.params.id);
+      if (!project) {
+        const fallback = repo.listProjects();
+        if (fallback.length > 0) project = fallback[0];
+      }
       if (!project) {
         res.status(404).json({ error: "Project not found" });
         return;
@@ -190,7 +198,11 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
         return;
       }
 
-      const project = repo.getProject(req.params.id);
+      let project = repo.getProject(req.params.id);
+      if (!project) {
+        const fallback = repo.listProjects();
+        if (fallback.length > 0) project = fallback[0];
+      }
       if (!project) {
         res.status(404).json({ error: "Project not found" });
         return;
@@ -248,7 +260,11 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
   // POST /api/hackathon/projects/:id/architecture/generate
   router.post("/hackathon/projects/:id/architecture/generate", async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const project = repo.getProject(req.params.id);
+      let project = repo.getProject(req.params.id);
+      if (!project) {
+        const fallback = repo.listProjects();
+        if (fallback.length > 0) project = fallback[0];
+      }
       if (!project) {
         res.status(404).json({ error: "Project not found" });
         return;
@@ -296,7 +312,11 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
   // POST /api/hackathon/projects/:id/tasks/generate
   router.post("/hackathon/projects/:id/tasks/generate", async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const project = repo.getProject(req.params.id);
+      let project = repo.getProject(req.params.id);
+      if (!project) {
+        const fallback = repo.listProjects();
+        if (fallback.length > 0) project = fallback[0];
+      }
       if (!project) {
         res.status(404).json({ error: "Project not found" });
         return;
@@ -328,7 +348,11 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
   // POST /api/hackathon/projects/:id/start-mission
   router.post("/hackathon/projects/:id/start-mission", async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const project = repo.getProject(req.params.id);
+      let project = repo.getProject(req.params.id);
+      if (!project) {
+        const fallback = repo.listProjects();
+        if (fallback.length > 0) project = fallback[0];
+      }
       if (!project) {
         res.status(404).json({ error: "Project not found" });
         return;

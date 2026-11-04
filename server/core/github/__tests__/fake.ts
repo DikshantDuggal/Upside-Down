@@ -34,7 +34,7 @@ export class FakeGitHub implements GitHubApi {
    else if(route==='/repos/acme/demo/issues'){data={number:++this.number,title:body.title,body:body.body,user:this.user,html_url:`https://github.com/acme/demo/issues/${this.number}`,assignees:body.assignees??[]};this.issues.push(data);status=201;}
    else if(/\/issues\/\d+\/comments$/.test(route)){const now=new Date().toISOString();data={id:++this.commentId,body:body.body,user:this.user,created_at:now,updated_at:now,html_url:'https://github.com/acme/demo/issues/1#issuecomment-'+this.commentId,issue:Number(route.split('/').at(-2))};this.comments.push(data);status=201;if(this.loseNextWrite){this.loseNextWrite=false;throw new GitHubError('Response lost after acceptance');}}
    else if(route.endsWith('/dispatches')){this.dispatches++;status=204;}
-   else if(method==='PATCH'){data=body;}
+   else if(method==='PATCH'){const issue=this.issues.find(i=>i.number===Number(route.split('/').at(-1)));if(issue)Object.assign(issue,body);data=body;}
    else throw new Error('Unimplemented fake write '+endpoint);
   }
   return {status,headers,data:data as T};

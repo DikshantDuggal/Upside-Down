@@ -1,100 +1,89 @@
-# GitHub-Native Multi-Agent Communication Architecture
+# GitHub communication: implemented Phase5 architecture
 
-Upside-Down 2.0 uses **GitHub as the primary, authoritative communication and collaboration platform**.
-There is **no direct agent-to-agent networking**, no local WebSocket broker, and no peer-to-peer requirement.
+GitHub Issues and issue comments are the authoritative communication ledger.
+The existing application backend handles planning and the dashboard. The optional
+standalone agent bridge needs Node24.20+ and authenticated `gh`, without an app
+server, LAN configuration, another message service, or direct agent connections.
 
----
+## Connect and start a mission
 
-## 1. Core Architecture Principles
+1. Authenticate the host's own GitHub CLI (`gh auth login`). Do not share its token.
+2. Approve the existing project architecture and generate its task contracts.
+3. Open **Agent Communication Center** in Upside-Down.
+4. Pair the host browser with the protected dashboard key in
+   `%LOCALAPPDATA%/UpsideDown/github-coordination/dashboard.key`.
+   The key is an application session secret, not a GitHub token. Do not post it.
+5. Expand Connect repository, enter an existing authorized `owner/repo`, and provide
+   developer login/role/tool JSON. GitHub validates identities and assignability;
+   the host needs repository write permission and enabled issues.
+6. Connect/start: create/reconcile one coordinator issue and a task issue for every
+   contract. No developer receipt is assumed until that account posts TASK_ACK.
 
-1. **GitHub Issues for Work Assignments:**
-   - One coordinator issue per project: `[UD-COORDINATOR] <Project Name>` (labeled `ud-coordination`).
-   - One dedicated task issue per contract: `[UD-TASK] <Task Title>` (labeled `ud-task`, assigned to the developer's GitHub handle).
-2. **GitHub Comments for Agent Messages:**
-   - All inter-agent and inter-developer communication occurs via GitHub issue comments formatted using the `UD-IC/2.0` protocol.
-3. **GitHub API Author Verification:**
-   - Message senders are validated against the authenticated GitHub API author (`comment.user.id` and `comment.user.login`). Senders specified in comment text are never blindly trusted.
-4. **Isolated Git Branches for Development:**
-   - Each task assigns an isolated branch (e.g. `feat/<task-id>`) and allowed file path patterns.
-5. **Pull Requests for Evidence:**
-   - PR URLs, current commit head SHAs, review states, and passing CI checks gate task completion.
-6. **No Local LAN or Direct Connections:**
-   - Developers and their AI coding assistants interact exclusively through GitHub CLI (`gh`) or standard GitHub issue comments.
+The host-authored immutable bootstrap comment contains the versioned project,
+architecture, participant numeric GitHub IDs and contracts. Task issue bodies carry
+stable project/task markers and human-readable manual prompts; titles alone never
+establish identity or ownership. Labels are `ud-coordination` and `ud-task`.
+GitHub issue assignees and host-authorized assignment messages identify ownership.
+Reassignment preserves the task issue and changes the explicit branch/owner revision.
 
----
+## Verification and routing
 
-## 2. Issue & Workspace Coordination Structure
+`server/core/github/protocol.ts` validates strict UD-IC/2.0 envelopes and payloads.
+GitHub API comment authorship (`user.id` plus login) is checked independently of the
+sender text. This is API provenance verification, not a custom cryptographic
+signature on every comment. Webhook bodies separately use GitHub HMAC-SHA256.
 
-```text
-GitHub Repository: owner/repo
-  │
-  ├── Issue #100: [UD-COORDINATOR] AI Study Planner
-  │     ├── Marker: <!-- ud-workspace:proj-123 -->
-  │     ├── Immutable Bootstrap Comment (```ud-workspace-json)
-  │     ├── TASK_ASSIGNMENT: task-fe -> @dev-alice (Issue #101)
-  │     └── TASK_ASSIGNMENT: task-be -> @dev-bob (Issue #102)
-  │
-  ├── Issue #101: [UD-TASK] Build Study Sessions View
-  │     ├── Assignee: @dev-alice
-  │     ├── Label: ud-task
-  │     ├── Comment: TASK_ACK from @dev-alice
-  │     ├── Comment: HANDOFF_REQUEST from @dev-alice -> @dev-bob
-  │     └── Comment: TASK_COMPLETED (PR #11, commit 7a8b9c0)
-  │
-  └── Issue #102: [UD-TASK] Implement Study Sessions API
-        ├── Assignee: @dev-bob
-        ├── Label: ud-task
-        ├── Comment: TASK_ACK from @dev-bob
-        ├── Comment: HANDOFF_RESPONSE from @dev-bob -> @dev-alice
-        └── Comment: TASK_COMPLETED (PR #12, commit f1e2d3c)
-```
+Only the verified host may assign/reassign work, update contracts, request CI or
+approve/reject submissions. Developers may update their own current assignment.
+Stale assignment IDs, unknown correlations, wrong recipients and unauthorized
+senders are rejected and audited. A completion report becomes **submitted**.
+**Verified** requires current PR author/branch/base/SHA, allowed/protected file
+checks (including renamed paths), actual CI, and exact-SHA host approval.
+No PR number, successful test output, tool execution or deployment is fabricated.
 
----
+Handoffs are correlated request -> ACK -> response -> requester completion, with
+optional host contract approval. Responses may use either participating task's
+issue context. Missing ACKs stay pending/overdue for host intervention. The reducer
+never auto-replies, runs issue instructions or starts coding agents.
 
-## 3. Communication Notification Pipeline
+## Persistence and recovery
 
-```text
-+-----------------------+                    +-----------------------+
-|  Developer / Agent A  |                    |  Developer / Agent B  |
-|  (e.g. Antigravity)   |                    |  (e.g. Claude Code)   |
-+-----------+-----------+                    +-----------▲-----------+
-            |                                            |
-            | Posts Comment via CLI / Web                | Receives via Poll / Webhook
-            v                                            |
-+--------------------------------------------------------+-----------+
-|                        GitHub Issues & PRs                         |
-|             (Authoritative, Auditable Event Ledger)                |
-+-----------------------------------+--------------------------------+
-                                    |
-            Webhook Push (or Bounded Polling Fallback)
-                                    v
-+--------------------------------------------------------------------+
-|               Upside-Down Coordinator & Dashboard                  |
-|          Validates Provenance, Reduces State, Checks CI            |
-+--------------------------------------------------------------------+
-```
+The protected native SQLite cache stores remote pages/ETags, messages, outbound
+intents, checkpoints and cursor leases. Every completed synchronization reads the
+coordinator and authorized task issues, validates them and atomically commits the
+snapshot/checkpoint. Full replay rebuilds the cache after restart or attach.
+A failed network/authentication/pagination pass never advances the checkpoint.
+The cache is not an alternative message authority.
 
----
+Conditional GitHub GETs and paginated reads are bounded (20pages per collection).
+Transient reads use bounded exponential backoff and honor rate-limit retry time;
+long rate limits return a retry requirement. Writes are never blindly retried:
+unknown outcomes retain the exact ID/body and reconcile remote comments first.
+SQLite leases serialize consumers. No tools/board unread/wait/hook cursor or native
+scheduled monitor is consumed, enabled or modified.
 
-## 4. Bounded Polling & Rate Limit Resilience
+Edited structured comments are quarantined. Deleted source comments disappear
+from the rebuilt projection and are reported; previous derived completion is not
+silently retained without its evidence. Host bootstrap edits/deletion require
+explicit human repair. Publish a new correlated message instead of editing one.
 
-When webhooks are not configured, Upside-Down uses **bounded, conditional GitHub API polling**:
-1. **ETag & Conditional Requests:** `If-None-Match` prevents consuming rate limits when comments have not changed (returns HTTP 304).
-2. **Cursor Persistence:** The last processed comment ID is stored in SQLite WAL (`github_cache`), ensuring zero lost messages across restarts.
-3. **Exponential Backoff:** On HTTP 429/403, pauses according to `Retry-After` or `x-ratelimit-reset`.
-4. **Bounded Lifetimes:** Polling cycles never loop indefinitely; max polling intervals are capped to 60 seconds.
+## Dashboard authentication and delivery
 
----
+Host sessions use HttpOnly, SameSite=Strict cookies, CSRF and an allowed-Origin
+check. GitHub credentials stay in `gh`/the server environment. Browser storage may
+contain only unresolved message intent data; pairing/CSRF secrets are not stored.
+The dashboard shows GitHub task links, actor/tool reports, correlated handoffs,
+validated source-comment timeline, PR/check facts and validation audit.
+Existing local-only mutation routes reject GitHub-managed missions; communication
+is routed to the GitHub center. Older offline features are preserved for unrelated
+legacy workspaces; no new local agent transport was added.
 
-## 5. Team Setup Guide (Zero LAN Setup Required)
+An optional `/api/github/webhook` verifies the **raw** HMAC signature, deduplicates
+both delivery ID and body hash, then re-fetches canonical GitHub state. No public
+receiver/webhook registration was deployed in this session. Use explicit Refresh
+or the bounded CLI poll fallback. A native scheduled monitor remains paused.
 
-1. **Host Prerequisites:**
-   - Host logs into GitHub CLI: `gh auth login`.
-   - Host starts Upside-Down: `npm run dev:all`.
-2. **Host Workspace Initialization:**
-   - Open [http://localhost:5173](http://localhost:5173) and navigate to **Agent Communication Center**.
-   - Enter repository (e.g. `owner/repo`) and click **"Connect repository and start GitHub mission"**.
-   - Issues are automatically provisioned on GitHub.
-3. **Teammate Access:**
-   - Teammate Developer B runs `node scripts/agent-bridge.mjs discover --repo owner/repo`.
-   - Teammate reads task, acknowledges, and submits code via standard GitHub pull requests.
+GitHub API contracts: [issue comments](https://docs.github.com/en/rest/issues/comments),
+[webhook signatures](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
+See `AGENT_BRIDGE.md`, `UD_IC_2_PROTOCOL.md` and `MULTI_AGENT_TEST.md` for exact commands
+and the separation between actual GitHub results and fixture-only multi-identity tests.

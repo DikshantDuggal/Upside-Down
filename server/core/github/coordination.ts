@@ -85,7 +85,7 @@ export class GitHubCoordination {
  async assign(repo:string,id:string,taskId:string,assignee:string,branch:string){const snapshot=await this.poll(repo,id),user=await this.identity();if(user.id!==snapshot.workspace.host.id)throw new Error('Only host may reassign');const task=snapshot.tasks.find(t=>t.id===taskId);if(!task?.issue)throw new Error('Task issue missing');login(assignee);
   if(!snapshot.workspace.members.some(m=>same(m.login,assignee)))throw new Error('Assignee is outside approved team');
   const m=message({projectId:id,taskId,sender:user.login,recipient:assignee,type:'TASK_ASSIGNMENT',payload:{assignee,branch,issue:task.issue,reason:'Explicit host reassignment'}});
-  const result=await this.send(repo,id,m);await this.api.request('PATCH',`/repos/${repo}/issues/${task.issue}`,{assignees:[assignee]});return result;
+  return this.send(repo,id,m);
  }
  async inspectPr(transport:GitHubTransport,workspace:Workspace,taskId:string,assignee:string,branch:string,submission:AgentMessage):Promise<PrEvidence>{
   const number=Number(submission.payload.prNumber),pr=(await transport.read<any>(`/repos/${workspace.repo}/pulls/${number}`)).data;

@@ -334,7 +334,16 @@ async function main() {
       UD_DEVICE_DB: path.join(clientDataDir, "device-b.db"),
       UD_DEVICE_TOKEN_FILE: path.join(clientDataDir, "device-token.txt"),
       UD_REVIEWER_TOKEN_FILE: path.join(clientDataDir, "reviewer-token.txt"),
-      UD_ALLOWED_ORIGINS: "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4000,http://localhost:4000,http://127.0.0.1:4100,http://localhost:4100",
+      UD_ALLOWED_ORIGINS: [
+        "http://127.0.0.1:5173", "http://localhost:5173",
+        "http://127.0.0.1:4000", "http://localhost:4000",
+        "http://127.0.0.1:4100", "http://localhost:4100",
+        ...lanAddresses.flatMap(a => [
+          `http://${a.address}:5173`,
+          `http://${a.address}:4000`,
+          `http://${a.address}:4100`,
+        ]),
+      ].join(","),
     }
   );
 

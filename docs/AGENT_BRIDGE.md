@@ -1,171 +1,101 @@
-# Upside-Down Agent Bridge CLI Guide
+# Standalone GitHub agent bridge
 
-The **Agent Bridge CLI** (`scripts/agent-bridge.mjs`) is a lightweight, zero-dependency Node.js bridge that connects AI coding assistants (Google Antigravity, Claude Code, OpenAI Codex, Cursor, Aider, OpenCode) to the GitHub-native Upside-Down 2.0 coordination protocol (`UD-IC/2.0`).
+Prerequisites: Node24.20+ and an authenticated GitHub CLI. Use each developer's own
+account. No local coordination server, database sharing or LAN URL is needed.
+The bridge communicates only with GitHub and keeps its own protected local cache.
+It does not run coding instructions from issues or automatically execute an agent.
 
-It allows agents and developers to interact with GitHub issues, receive assignments, post progress updates, trigger handoffs, inspect PR status, and participate in coordinated hackathon missions without requiring open ports or direct network connections.
+From the repository:
 
----
-
-## 1. Prerequisites
-
-- **Node.js**: v18.0.0 or higher
-- **GitHub CLI (`gh`)**: Authenticated with repository access
-  ```bash
-  gh auth status
-  ```
-  *(Alternatively, set the `GITHUB_TOKEN` environment variable).*
-
----
-
-## 2. Basic Setup and Identity
-
-Run commands from the repository root:
-
-```bash
-# Verify identity & GitHub authentication
+```powershell
 node scripts/agent-bridge.mjs whoami
-
-# Check active task issues and coordination state
-node scripts/agent-bridge.mjs discover --repo <owner>/<repo>
+node scripts/agent-bridge.mjs attach --repo OWNER/REPO --issue COORDINATOR_NUMBER
+node scripts/agent-bridge.mjs discover --repo OWNER/REPO
+node scripts/agent-bridge.mjs read --repo OWNER/REPO --project PROJECT_ID
+node scripts/agent-bridge.mjs prompt --repo OWNER/REPO --project PROJECT_ID --task TASK_ID
 ```
 
----
+Use the **coordinator** issue for attach; task issue numbers are discovered from
+host assignment messages. A fresh cache can reconstruct the mission via attach.
+If a different local cache directory is needed, add `--state ABSOLUTE_DIRECTORY`.
+Never point it at another agent's cache or tools/board state.
 
-## 3. CLI Command Reference
+## Register and acknowledge
 
-### Discover Workspace & Tasks
-Find the coordinator issue and active tasks for a repository:
-```bash
-node scripts/agent-bridge.mjs discover --repo DikshantDuggal/Upside-Down
+Save `register.json` containing your approved role and selected coding tool:
+
+```json
+{"role":"backend","tool":"codex"}
 ```
 
-### Inspect Assigned Task & Prompt Generation
-Generate the complete system prompt and instructions for an AI coding assistant:
-```bash
-node scripts/agent-bridge.mjs prompt \
-  --repo DikshantDuggal/Upside-Down \
-  --issue <task-issue-number> \
-  --agent-id dev-a
-```
-This produces a structured prompt containing:
-- Assigned task scope, boundaries, and acceptance criteria
-- Permitted file patterns (strict edit boundary)
-- Branch name conventions (`feat/<task-id>`)
-- Required `UD-IC/2.0` comment format
-- Upstream and downstream dependencies
-
----
-
-### Task Lifecycle Commands
-
-#### 1. Acknowledge Assignment (`ack`)
-Signify that the agent/developer has accepted the assignment and understands the contract:
-```bash
-node scripts/agent-bridge.mjs ack \
-  --repo DikshantDuggal/Upside-Down \
-  --issue <task-issue-number> \
-  --agent-id dev-a \
-  --assignment-id <assignment-id>
+```powershell
+node scripts/agent-bridge.mjs register --repo OWNER/REPO --project PROJECT_ID --payload register.json
+node scripts/agent-bridge.mjs ready --repo OWNER/REPO --project PROJECT_ID
+node scripts/agent-bridge.mjs ack --repo OWNER/REPO --project PROJECT_ID --task TASK_ID
+node scripts/agent-bridge.mjs started --repo OWNER/REPO --project PROJECT_ID --task TASK_ID
 ```
 
-#### 2. Start Work (`started`)
-Signal that implementation work has begun on the dedicated task branch:
-```bash
-node scripts/agent-bridge.mjs started \
-  --repo DikshantDuggal/Upside-Down \
-  --issue <task-issue-number> \
-  --agent-id dev-a \
-  --task-id <task-id> \
-  --branch feat/<task-id>
+The bridge derives sender identity from `gh api user` and looks up the current
+assignment ID. It never impersonates another developer. Registration/ready means
+that account reported readiness; it is not proof that Codex, Claude Code,
+Antigravity, OpenCode or Cursor is connected through a proprietary direct API.
+Tool changes can be reported by another AGENT_REGISTER while preserving the role.
+
+## Progress and handoffs
+
+Save `progress.json` with `{"progress":25,"text":"Actual progress and evidence."}`:
+
+```powershell
+node scripts/agent-bridge.mjs progress --repo OWNER/REPO --project PROJECT_ID --task TASK_ID --payload progress.json
+node scripts/agent-bridge.mjs blocked --repo OWNER/REPO --project PROJECT_ID --task TASK_ID --payload blocker.json
 ```
 
-#### 3. Report Progress (`progress`)
-Send monotonic progress updates (0 to 100) with descriptive milestone logs:
-```bash
-node scripts/agent-bridge.mjs progress \
-  --repo DikshantDuggal/Upside-Down \
-  --issue <task-issue-number> \
-  --agent-id dev-a \
-  --task-id <task-id> \
-  --percent 50 \
-  --message "Implemented auth middleware and unit tests"
+For `handoff.json`, provide `targetTaskId`, `text`, optional `contract`, and optional
+absolute ISO deadline (or a bounded-duration string such as `2h`). Then:
+
+```powershell
+node scripts/agent-bridge.mjs handoff --repo OWNER/REPO --project PROJECT_ID --task SOURCE_TASK --to OTHER_LOGIN --payload handoff.json
 ```
 
-#### 4. Report Blocker (`blocked`)
-Flag missing dependencies or unexpected obstacles to the host and teammates:
-```bash
-node scripts/agent-bridge.mjs blocked \
-  --repo DikshantDuggal/Upside-Down \
-  --issue <task-issue-number> \
-  --agent-id dev-a \
-  --task-id <task-id> \
-  --reason "Awaiting data schema confirmation from backend lead"
+ACK/response/completion use the generic `post --file message.json` command with a
+complete UD-IC/2.0 envelope. See `UD_IC_2_PROTOCOL.md`. Correlate to the **request's
+message UUID**, not its GitHub numeric comment ID. Use either participating task
+context and the matching task issue; do not post into an unrelated task.
+
+## Actual PR submission
+
+Save `evidence.json` with real values (never use these placeholders as evidence):
+
+```json
+{"branch":"AUTHORIZED_TASK_BRANCH","prNumber":123,"commitHash":"FULL_40_CHARACTER_REAL_HEAD_SHA","text":"Actual implementation/test report."}
 ```
 
-#### 5. Request or Complete a Handoff (`handoff`)
-Coordinate with another developer via structured dependency contracts:
-```bash
-# Request data or an API contract from another developer
-node scripts/agent-bridge.mjs handoff \
-  --repo DikshantDuggal/Upside-Down \
-  --issue <task-issue-number> \
-  --agent-id dev-a \
-  --target dev-b \
-  --action request \
-  --summary "Need auth response schema for user profile"
-
-# Complete a handoff response
-node scripts/agent-bridge.mjs handoff \
-  --repo DikshantDuggal/Upside-Down \
-  --issue <task-issue-number> \
-  --agent-id dev-b \
-  --target dev-a \
-  --action complete \
-  --summary "Auth response schema published in shared types" \
-  --handoff-id <handoff-id>
+```powershell
+node scripts/agent-bridge.mjs complete --repo OWNER/REPO --project PROJECT_ID --task TASK_ID --payload evidence.json
+node scripts/agent-bridge.mjs checks --repo OWNER/REPO --project PROJECT_ID --task TASK_ID
 ```
 
-#### 6. Complete Task (`complete`)
-Submit implementation evidence for host review and verification. Requires a Pull Request:
-```bash
-node scripts/agent-bridge.mjs complete \
-  --repo DikshantDuggal/Upside-Down \
-  --issue <task-issue-number> \
-  --agent-id dev-a \
-  --task-id <task-id> \
-  --pr-url "https://github.com/DikshantDuggal/Upside-Down/pull/15" \
-  --head-sha "8f3b2a1c0d4e" \
-  --summary "Feature complete with 100% test coverage"
+Only the host may dispatch checks, and an explicit active GitHub workflow must be
+configured for the mission. No server-side execution of submitted code occurs.
+PR existence or a developer's success text never means verified completion.
+
+## Recovery and bounded reads
+
+```powershell
+node scripts/agent-bridge.mjs poll --repo OWNER/REPO --project PROJECT_ID --seconds 30
+node scripts/agent-bridge.mjs outbox
+node scripts/agent-bridge.mjs post --repo OWNER/REPO --project PROJECT_ID --file message.json
 ```
 
----
+Polling is capped at60seconds/10cycles, with bounded individual API requests and
+backoff. No unattended infinite shell/agent loop or scheduled task is installed.
+To stop a running bridge, use Ctrl+C; leases expire after interrupted processes.
+For an unknown write outcome, repeat the original command/payload, or retain the
+original message file with its UUID/time. The bridge reconciles before retrying.
+Changing an unresolved message ID's body is refused. Errors do not advance cursors.
 
-### Verification and Health Checks
-
-#### Verify Pull Request Checks (`checks`)
-Inspect commit status, CI workflows, and changed files against task boundaries:
-```bash
-node scripts/agent-bridge.mjs checks \
-  --repo DikshantDuggal/Upside-Down \
-  --pr <pull-request-number>
-```
-
-#### Inspect Offline Outbox (`outbox`)
-Inspect or flush queued outgoing messages if running under intermittent network conditions:
-```bash
-node scripts/agent-bridge.mjs outbox \
-  --repo DikshantDuggal/Upside-Down \
-  --action list
-```
-
----
-
-## 4. Integration with Non-Bridge AI Assistants (Codex, Claude, Cursor)
-
-For AI assistants that do not execute CLI scripts directly, developers can copy the output of `prompt` directly into the chat:
-
-```bash
-node scripts/agent-bridge.mjs prompt --repo <owner>/<repo> --issue <issue#> > prompt.txt
-```
-
-Paste `prompt.txt` into the assistant window. The assistant will format its comments with the `UD-IC/2.0` code fence, and the developer can post them directly to GitHub or via the bridge.
+The manual prompt includes project/architecture, contracts, dependencies, file
+boundaries, branch, tests, submission and GitHub communication instructions.
+A developer must approve execution in their coding tool. If the tool cannot use
+GitHub, the developer can paste the serialized comment and submit a PR manually.
+No future Local/WebSocket/MCP transport is implemented in this phase.

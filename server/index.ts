@@ -75,6 +75,24 @@ export function createServer(dbPath?: string): ServerInstance {
     }, "system_init");
   }
 
+  const hackathonRepo = new HackathonRepository(db.getRawDb());
+  if (!hackathonRepo.getProject("proj-upside-down")) {
+    hackathonRepo.createProject({
+      id: "proj-upside-down",
+      name: "Upside-Down Collaboration Platform",
+      problemStatement: "Hackathon teams struggle with uncoordinated multi-agent coding assistants, leading to merge conflicts and lost time.",
+      rules: "24-Hour Hackathon MVP. Open Source Stack.",
+      availableTime: "24h",
+      developerCount: 3,
+      skillLevels: "Senior AI Developers",
+      technologies: ["React 19", "Express", "SQLite", "TypeScript"],
+      budgetConstraints: "Zero budget / free tier only",
+      judgingCriteria: "Multi-agent coordination, real-world utility, polish",
+      status: "ideation",
+      hostId: "host-host",
+    });
+  }
+
   const app: Express = express();
   app.use(cors());
   app.use(express.json({limit: "1mb", verify: (req, _res, buffer) => {

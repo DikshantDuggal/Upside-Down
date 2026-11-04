@@ -1,115 +1,75 @@
-# UD-IC/2.0 Protocol Specification
+# UD-IC/2.0 protocol
 
-**Upside-Down Inter-Agent Coordination Protocol Version 2.0 (`UD-IC/2.0`)** is a formalized, GitHub-native messaging protocol designed for multi-agent and multi-developer collaborative coding.
+GitHub comments are authoritative. `server/core/github/protocol.ts` contains the
+strict parser/serializer; `reducer.ts` enforces identity and state transitions.
+Human-only comments are readable but never mutate task state.
 
-It embeds structured, machine-verifiable JSON envelopes within standard human-readable GitHub issue and pull request comments.
+The serializer emits a human summary and exactly one `ud-ic-json` fence. Example:
 
----
-
-## 1. Message Envelope Format
-
-Every `UD-IC/2.0` message posted to GitHub consists of two synchronized layers:
-1. **Human-Readable Layer:** Markdown-rendered section with task summaries, instructions, mentions, and progress bars.
-2. **Machine-Readable Layer:** An immutable, parseable JSON code fence tagged with ````ud-ic-json````.
-
-```markdown
-### 🚀 UD-IC/2.0: TASK_STARTED
-> **Task:** `task-backend-auth`
-> **Agent:** `@dev-bob`
-> **Branch:** `feat/task-backend-auth`
-
-Branch created and initial endpoints drafted.
-
-```ud-ic-json
-{
-  "protocol": "UD-IC/2.0",
-  "id": "msg-8f123456",
-  "timestamp": "2026-11-04T05:30:00.000Z",
-  "sender": {
-    "agentId": "dev-bob",
-    "githubHandle": "dev-bob",
-    "role": "developer"
-  },
-  "recipient": {
-    "agentId": "host",
-    "githubHandle": "DikshantDuggal",
-    "role": "host"
-  },
-  "type": "TASK_STARTED",
-  "taskId": "task-backend-auth",
-  "branch": "feat/task-backend-auth",
-  "payload": {
-    "baseBranch": "main"
-  }
-}
-```
+```json
+{"version":"UD-IC/2.0","id":"03a551e7-57bc-4ca2-ae0f-5f036ee1dd7d","projectId":"example-project","taskId":"backend-api","sender":"developer-login","recipient":"host","type":"TASK_ACK","createdAt":"2026-11-04T05:30:00.000Z","payload":{"assignmentId":"b65beed5-2521-4a98-865f-b5b70d417ca6","text":"Assignment received."}}
 ```
 
----
+These are example IDs. Every envelope field above is required. `taskId` is null
+for project-wide messages. Optional `correlationId` references a message UUID,
+never a GitHub comment ID. Sender is a login string; recipient is a login, `host`
+or `all`. Unknown fields, malformed UUIDs/timestamps, oversized payloads, invalid
+progress and abbreviated commit SHAs are rejected. Messages are limited to24KB.
+Known credential/private-key patterns are refused before publication.
 
-## 2. Complete Message Types (22 Total)
+## Supported payloads (22 types)
 
-### A. Lifecycle & Registration
-| Type | Sender | Recipient | Description |
-|---|---|---|---|
-| `AGENT_REGISTER` | Developer/Agent | Host | Registers an agent with its capabilities, supported tools, and handle |
-| `AGENT_READY` | Developer/Agent | Host | Signals that the agent has loaded repository context and is ready for work |
-| `AGENT_DISCONNECT` | Developer/Agent / Host | All | Notifies that an agent has disconnected or gone offline |
-| `AGENT_RECONNECT` | Developer/Agent | Host | Signals that an agent has reconnected and re-established its lease |
+| Type | Payload/context |
+| --- | --- |
+| AGENT_REGISTER | approved `role`, supported `tool` |
+| AGENT_READY, AGENT_DISCONNECT, AGENT_RECONNECT | optional `text` |
+| TASK_ASSIGNMENT | `assignee`, isolated `branch`, numeric task `issue`; optional `reason`; host only |
+| TASK_ACK, TASK_STARTED, TASK_BLOCKED, TASK_FAILED | current `assignmentId`; optional `text` |
+| TASK_PROGRESS | current `assignmentId`, `progress` 0–100; optional `text` |
+| TASK_COMPLETED | current `assignmentId`, `prNumber`, full `commitHash`, `branch`; optional `text` |
+| HANDOFF_REQUEST | `targetTaskId`, `text`; optional `contract`, ISO `deadline` or duration such as `2h` |
+| HANDOFF_ACK, HANDOFF_COMPLETED | optional `text`; correlate to request |
+| HANDOFF_RESPONSE | optional `text`, `contract`, `prNumber`; correlate to request |
+| CONTRACT_UPDATE | `text`, `contract` as applicable |
+| CONTRACT_ACK | optional `text`; correlate to update |
+| INTEGRATION_REQUEST, INTEGRATION_RESULT | `prNumber`, `expectedHeadSha`, `text` as applicable |
+| HOST_MESSAGE | `text`; optional `action`; only `resolve_blocker` mutates blocker state |
+| HOST_APPROVAL | submission: `prNumber`, `expectedHeadSha`, correlate to submission; handoff: correlate to response |
+| HOST_REJECTION | optional `text`; correlate to submission |
 
-### B. Task Assignments & Execution
-| Type | Sender | Recipient | Description |
-|---|---|---|---|
-| `TASK_ASSIGNMENT` | Host | Developer | Dispatches a structured task contract to the developer on their issue |
-| `TASK_ACK` | Developer | Host | Acknowledges receipt and understanding of the task contract |
-| `TASK_STARTED` | Developer | Host | Confirms work has started on the specified git branch |
-| `TASK_PROGRESS` | Developer | Host | Reports progress (percent 0-100) and step-by-step progress logs |
-| `TASK_BLOCKED` | Developer | Host | Alerts host of missing dependencies, environment issues, or blockers |
-| `TASK_COMPLETED` | Developer | Host | Submits evidence: PR URL, head commit SHA, and changelog for review |
-| `TASK_FAILED` | Developer | Host | Reports fatal task failure with error logs and stack traces |
+The reducer imposes contextual rules beyond schema shape. Task/handoff messages
+and host approval/rejection require a task ID. Handoff replies may use either
+participating task on its corresponding issue. Clock-only deadlines such as
+`12:00` are rejected. ACK/response/completion, CONTRACT_ACK and host
+approval/rejection require correlation IDs.
 
-### C. Cross-Agent Handoffs
-| Type | Sender | Recipient | Description |
-|---|---|---|---|
-| `HANDOFF_REQUEST` | Developer A | Developer B | Requests an API schema, interface definition, or data artifact |
-| `HANDOFF_ACK` | Developer B | Developer A | Developer B confirms receipt of the handoff request |
-| `HANDOFF_RESPONSE` | Developer B | Developer A | Developer B supplies the requested contract/mock/artifact |
-| `HANDOFF_COMPLETED`| Developer A | Developer B & Host | Developer A verifies that the dependency is fulfilled |
+## Authorship and transitions
 
-### D. Contracts & Integration
-| Type | Sender | Recipient | Description |
-|---|---|---|---|
-| `CONTRACT_UPDATE` | Host | Developer(s) | Broadcasts modified interface specifications or schema changes |
-| `CONTRACT_ACK` | Developer | Host | Developer confirms compliance with the updated contract |
-| `INTEGRATION_REQUEST`| Host | Integration Dev | Triggers multi-branch integration and conflict verification |
-| `INTEGRATION_RESULT` | Integration Dev | Host | Reports integration test suite results, coverage, and merge status |
+Approved workspace members have GitHub logins and numeric user IDs independently
+resolved through GitHub. Claimed sender must match the actual comment author and
+approved identity. The bootstrap must be the issue creator's immutable comment.
+This verifies API authorship; payloads are not cryptographically signed.
 
-### E. Host Governance & Approvals
-| Type | Sender | Recipient | Description |
-|---|---|---|---|
-| `HOST_MESSAGE` | Host | All / Developer | Broadcast guidance, announcements, or priority adjustments |
-| `HOST_APPROVAL` | Host | Developer | Formal host acceptance of a task or release based on verified evidence |
-| `HOST_REJECTION` | Host | Developer | Rejection with specific feedback and remediation criteria |
+Only the host assigns/reassigns. Actual GitHub issue assignees are updated and the
+issue is preserved. Each assignment has a new UUID; the old owner's stale updates
+are rejected. Only the current owner can ACK/start/report progress. Dependencies
+must be verified before starting.
 
----
+Normal progression: awaiting_ack → acknowledged → running → submitted → verified.
+Blocked/failed tasks require explicit recovery. Completion text creates a
+submission. Host approval requires actual PR author/branch/base/head/file/review
+policy, observed passing CI and the exact approved head SHA. Missing CI is
+`not_configured`, never passed. Handoff approval reviews the response, not code.
 
-## 3. Reducer State Machine & Integrity Rules
+## Replay and recovery
 
-The `UD-IC/2.0` reducer (`server/core/github/reducer.ts`) enforces strict deterministic state folding:
+Edited protocol comments are quarantined. Bounded paginated conditional rereads
+rebuild state after deletions/reordering. Duplicate UUIDs fold once; conflicting
+content is rejected. Missing correlations are deferred. Semantic duplicate
+handoff ACKs cannot trigger reply loops. No message executes shell commands or
+coding tools.
 
-1. **Authorship Verification:**
-   - Senders declared inside `ud-ic-json` must match the authenticated GitHub comment author (`comment.user.id`).
-2. **Strict State Sequencing:**
-   - Tasks must strictly transition through:
-     $$\text{unassigned} \longrightarrow \text{awaiting\_ack} \longrightarrow \text{acknowledged} \longrightarrow \text{running} \longrightarrow \text{submitted} \longrightarrow \text{verified}$$
-   - Direct jumps (e.g. from `unassigned` directly to `submitted`) are rejected.
-3. **Monotonic Progress Guarantee:**
-   - `percent` in `TASK_PROGRESS` must be $\ge$ the previous highest reported percent. Regressive progress updates are discarded.
-4. **Evidence Gating on Approval:**
-   - `HOST_APPROVAL` is strictly prohibited unless:
-     - Task is in `submitted` state.
-     - A valid Pull Request URL is registered.
-     - The PR head SHA matches the submission.
-     - All CI checks and integration tests are passing.
-5. **Quarantine of Edited Comments:**
-   - Any GitHub comment where `comment.updated_at !== comment.created_at` is flagged as quarantined and excluded from state calculation to prevent tamper attacks.
+The separate protected SQLite cache stores source IDs, decisions, cursors, leases
+and pending sends. Snapshot/checkpoint commit atomically after a complete read;
+network/auth failures never advance it. An ambiguous write retains the original
+UUID/body/time and reconciles the actual remote comment before retry.
