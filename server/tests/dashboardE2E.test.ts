@@ -17,7 +17,9 @@ async function runDashboardE2ETests() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "upside-e2e-test-"));
   const dbFile = path.join(tmpDir, "e2e_test.db");
 
-  const { app, db, coordinator, syncEngine } = createServer(dbFile);
+  const { app, db, coordinator, syncEngine, frontendController } = createServer(dbFile);
+  const prevFrontend = frontendController.getStatus().activeFrontend;
+  frontendController.setFrontend("demo");
   const server = http.createServer(app);
 
   await new Promise<void>((resolve) => {
@@ -144,6 +146,9 @@ async function runDashboardE2ETests() {
 
     console.log("\n=== ALL TEST GROUP D & G TESTS PASSED! ===");
   } finally {
+    if (frontendController) {
+      frontendController.setFrontend("demo");
+    }
     server.close();
     db.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });

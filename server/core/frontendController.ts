@@ -291,6 +291,16 @@ export class FrontendController {
     };
   }
 
+  public setFrontend(id: "demo" | "team"): void {
+    const config = this.getConfig();
+    if (config.availableFrontends[id]) {
+      config.activeFrontend = id;
+      config.previousFrontend = id === "demo" ? "team" : "demo";
+      config.rollbackAvailable = true;
+      this.saveConfig(config);
+    }
+  }
+
   public rollbackFrontend(): ActivationResult {
     const config = this.getConfig();
     const now = new Date().toISOString();

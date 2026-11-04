@@ -167,7 +167,22 @@ export function App() {
   const data = useDashboard();
   const localSession = useLocalSession();
   const [pairing, setPairing] = useState(false);
-  const [page, setPage] = useState<Page>("overview");
+  const [page, setPage] = useState<Page>(() => {
+    const hash = window.location.hash.replace(/^#/, "");
+    if (pages.some((p) => p.id === hash)) return hash as Page;
+    return "overview";
+  });
+
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.replace(/^#/, "");
+      if (pages.some((p) => p.id === hash)) {
+        setPage(hash as Page);
+      }
+    };
+    window.addEventListener("hashchange", handleHash);
+    return () => window.removeEventListener("hashchange", handleHash);
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   const [taskId, setTaskId] = useState<string | undefined>();
   const [creating, setCreating] = useState(false);
@@ -653,6 +668,7 @@ export function App() {
 
   const navigate = (to: Page) => {
     setPage(to);
+    window.location.hash = to;
     setMenuOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -683,7 +699,30 @@ export function App() {
 
         <div className="header-actions">
           <span className="small muted" role="status">{backendState}</span>
-          <select aria-label="Active project" value={project?.id ?? ""} onChange={e=>void loadProjectData(e.target.value)}>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span className="small muted">Project:</span>
+            <select
+              aria-label="Active project"
+              value={project?.id ?? ""}
+              onChange={(e) => void loadProjectData(e.target.value)}
+              style={{
+                fontSize: "0.85rem",
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid var(--border-color, #d1d5db)",
+                background: "var(--bg-card, #ffffff)",
+                color: "var(--text-primary, #111827)",
+                fontWeight: 600,
+                maxWidth: "220px",
+              }}
+            >
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.availableTime ? `(${p.availableTime})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <span className="small muted">Work view:</span>
             <select

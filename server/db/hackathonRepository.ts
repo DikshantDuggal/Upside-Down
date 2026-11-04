@@ -315,6 +315,10 @@ export class HackathonRepository {
     }
   }
 
+  public deleteUnselectedIdeas(projectId: string): void {
+    this.db.prepare(`DELETE FROM hackathon_ideas WHERE project_id = ? AND is_selected = 0`).run(projectId);
+  }
+
   public listIdeas(projectId: string): ProjectIdea[] {
     const stmt = this.db.prepare(`SELECT * FROM hackathon_ideas WHERE project_id = ? ORDER BY version DESC, id ASC`);
     const rows = stmt.all(projectId) as Record<string, unknown>[];

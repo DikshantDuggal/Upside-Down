@@ -1,5 +1,5 @@
 {
-  "activeFrontend": "team",
+  "activeFrontend": "demo",
   "availableFrontends": {
     "demo": {
       "id": "demo",
@@ -22,8 +22,8 @@
       "description": "Official team implementation developed by assigned frontend engineer."
     }
   },
-  "previousFrontend": "demo",
-  "lastActivatedAt": "2026-11-04T01:30:17.316Z",
-  "lastActivationResult": "SUCCESS: Official team frontend validated and activated.",
+  "previousFrontend": "team",
+  "lastActivatedAt": "2026-11-04T01:48:55.806Z",
+  "lastActivationResult": "SUCCESS: Rolled back to Upside-Down Premium Demo Frontend (demo).",
   "rollbackAvailable": true
 }
