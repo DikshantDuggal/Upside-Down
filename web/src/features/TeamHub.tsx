@@ -1,16 +1,18 @@
 import { useState } from "react";
-import { UserPlus, Copy, Check, Bot, Activity } from "lucide-react";
+import { UserPlus, Copy, Check, Bot, Activity, Rocket } from "lucide-react";
 import type { TeamMember } from "../api/hackathonApi";
 import { Badge } from "../components/ui";
 
 interface TeamHubProps {
   team: TeamMember[];
   developerCount: 2 | 3;
+  projectStatus?: string;
   onInviteMember: (data: { name: string; role: string; assignedSlot: string; tool: string }) => Promise<{ inviteUrl: string; inviteToken: string }>;
   onJoinTeam: (data: { token: string; name: string; tool: string }) => Promise<void>;
+  onStartMission?: () => Promise<void>;
 }
 
-export function TeamHub({ team, developerCount, onInviteMember, onJoinTeam }: TeamHubProps) {
+export function TeamHub({ team, developerCount, projectStatus, onInviteMember, onJoinTeam, onStartMission }: TeamHubProps) {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [joinModalOpen, setJoinModalOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -45,7 +47,17 @@ export function TeamHub({ team, developerCount, onInviteMember, onJoinTeam }: Te
             Configure {developerCount} developers with their preferred AI assistants (Antigravity, Claude Code, Codex, Cursor).
           </p>
         </div>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          {onStartMission && projectStatus !== "development" && projectStatus !== "released" && projectStatus !== "deployed" && (
+            <button
+              className="button primary"
+              style={{ background: "#2563eb", borderColor: "#1d4ed8" }}
+              onClick={() => void onStartMission()}
+            >
+              <Rocket size={16} />
+              Start Mission
+            </button>
+          )}
           <button className="button secondary" onClick={() => setJoinModalOpen(true)}>
             Simulate Teammate Join
           </button>

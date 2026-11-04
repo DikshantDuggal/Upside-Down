@@ -11,7 +11,7 @@ import { HackathonRepository } from "../db/hackathonRepository.ts";
 import { AICoordinator } from "../core/aiCoordinator.ts";
 import { PromptBridgeService } from "../core/promptBridge.ts";
 import { IntegrationEngine } from "../core/integrationEngine.ts";
-import type { HackathonProject } from "../../contracts/hackathon.ts";
+import type { HackathonProject, TaskContractV2 } from "../../contracts/hackathon.ts";
 
 describe("Upside-Down 2.0: AI Hackathon Mission Control Engine", () => {
   const db = new DatabaseSync(":memory:");

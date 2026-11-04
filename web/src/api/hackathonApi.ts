@@ -276,6 +276,10 @@ export const hackathonApi = {
   },
 
   // Tasks
+  async startMission(projectId: string): Promise<{ success: boolean; project: HackathonProject; tasks: TaskContractV2[] }> {
+    return fetchJson(`${API_BASE}/projects/${projectId}/start-mission`, { method: "POST" });
+  },
+
   async generateTasks(projectId: string): Promise<{ success: boolean; tasks: TaskContractV2[] }> {
     return fetchJson(`${API_BASE}/projects/${projectId}/tasks/generate`, { method: "POST" });
   },
@@ -371,6 +375,14 @@ export const hackathonApi = {
     return fetchJson(`${API_BASE}/projects/${projectId}/deploy`, { method: "POST" });
   },
 
+  // GitHub Webhook Simulator
+  async handleGithubWebhook(payload: Record<string, unknown>): Promise<{ success: boolean; processed: boolean; taskId?: string; status?: string }> {
+    return fetchJson(`${API_BASE}/github/webhook`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
   // Real-time Event Subscription (SSE)
   subscribeEvents(projectId: string, onEvent: (event: { type: string; payload: any }) => void): () => void {
     const sse = new EventSource(`${API_BASE}/projects/${projectId}/events/stream`);
@@ -390,12 +402,15 @@ export const hackathonApi = {
     sse.addEventListener("IDEA_SELECTED", handleMessage as any);
     sse.addEventListener("ARCHITECTURE_GENERATED", handleMessage as any);
     sse.addEventListener("ARCHITECTURE_APPROVED", handleMessage as any);
+    sse.addEventListener("MISSION_STARTED", handleMessage as any);
     sse.addEventListener("TASKS_DECOMPOSED", handleMessage as any);
     sse.addEventListener("TASK_CLAIMED", handleMessage as any);
     sse.addEventListener("TASK_PROGRESS", handleMessage as any);
     sse.addEventListener("TASK_SUBMITTED", handleMessage as any);
     sse.addEventListener("TASK_COMPLETED", handleMessage as any);
+    sse.addEventListener("TEAM_MEMBER_JOINED", handleMessage as any);
     sse.addEventListener("HANDOFF_CREATED", handleMessage as any);
+    sse.addEventListener("HANDOFF_RESOLVED", handleMessage as any);
     sse.addEventListener("INTEGRATION_CHECKED", handleMessage as any);
     sse.addEventListener("RELEASE_APPROVED", handleMessage as any);
     sse.addEventListener("DEPLOYMENT_FINISHED", handleMessage as any);

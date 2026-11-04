@@ -189,6 +189,29 @@ export function App() {
   const [isDecomposing, setIsDecomposing] = useState(false);
   const [isCheckingIntegration, setIsCheckingIntegration] = useState(false);
   const [isDeploying, setIsDeploying] = useState(false);
+  const [activeIdentity, setActiveIdentity] = useState<"host" | "developer-a" | "developer-b" | "developer-c">("host");
+
+  const identityProfiles: Record<string, { name: string; tool: string; slot: string; role: string }> = {
+    host: { name: "Dikshant Duggal (Host)", tool: "antigravity", slot: "host", role: "host" },
+    "developer-a": { name: "Developer A (Frontend Lead)", tool: "antigravity", slot: "developer-a", role: "member" },
+    "developer-b": { name: "Developer B (Backend Lead)", tool: "claude-code", slot: "developer-b", role: "member" },
+    "developer-c": { name: "Developer C (AI Specialist)", tool: "cursor", slot: "developer-c", role: "member" },
+  };
+
+  const handleStartMission = async () => {
+    if (!project) return;
+    try {
+      const res = await hackathonApi.startMission(project.id);
+      setProject(res.project);
+      setTasksV2(res.tasks);
+      const teamRes = await hackathonApi.listTeam(project.id);
+      setTeamMembers(teamRes.team);
+      setNotice("🚀 MISSION STARTED! Multi-agent work contracts divided and assigned.");
+      setPage("contracts");
+    } catch (err: any) {
+      setActionError(err.message);
+    }
+  };
 
   // Load or initialize default Hackathon Project
   const loadProjectData = useCallback(async (projectId?: string) => {
@@ -328,11 +351,16 @@ export function App() {
     }
   };
 
-  const handleClaimTask = async (taskId: string, memberName: string, agentTool: string) => {
+  const handleClaimTask = async (taskId: string, memberName?: string, agentTool?: string) => {
     try {
-      await hackathonApi.claimTask(taskId, { memberName, agentTool });
+      const profile = identityProfiles[activeIdentity] || identityProfiles.host;
+      await hackathonApi.claimTask(taskId, {
+        memberName: memberName || profile.name,
+        agentTool: agentTool || profile.tool,
+        assignedSlot: profile.slot,
+      });
       if (project) await loadProjectData(project.id);
-      setNotice(`Claimed task ${taskId}!`);
+      setNotice(`Claimed task ${taskId} as ${profile.name}!`);
     } catch (err: any) {
       setActionError(err.message);
     }
@@ -575,6 +603,27 @@ export function App() {
         </div>
 
         <div className="header-actions">
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span className="small muted">View as:</span>
+            <select
+              value={activeIdentity}
+              onChange={(e) => setActiveIdentity(e.target.value as any)}
+              style={{
+                fontSize: "0.85rem",
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid var(--border-color, #d1d5db)",
+                background: "var(--bg-card, #ffffff)",
+                color: "var(--text-primary, #111827)",
+                fontWeight: 500,
+              }}
+            >
+              <option value="host">👑 Host (Dikshant Duggal)</option>
+              <option value="developer-a">💻 Dev A (Frontend / Antigravity)</option>
+              <option value="developer-b">⚙️ Dev B (Backend / Claude Code)</option>
+              <option value="developer-c">🧠 Dev C (AI / Cursor)</option>
+            </select>
+          </div>
           {project && (
             <span className="small muted">
               Project: <strong>{project.name}</strong>
@@ -651,6 +700,7 @@ export function App() {
               release={release}
               onCreateProject={handleCreateProject}
               onNavigateTab={navigate}
+              onStartMission={handleStartMission}
             />
           )}
 
@@ -691,8 +741,10 @@ export function App() {
             <TeamHub
               team={teamMembers}
               developerCount={project?.developerCount || 3}
+              projectStatus={project?.status}
               onInviteMember={handleInviteMember}
               onJoinTeam={handleJoinTeam}
+              onStartMission={handleStartMission}
             />
           )}
 

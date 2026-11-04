@@ -691,6 +691,26 @@ export class HackathonRepository {
     }));
   }
 
+  public getHandoff(handoffId: string): CrossAgentHandoff | null {
+    const rows = this.db.prepare(`SELECT * FROM hackathon_handoffs WHERE id = ?`).all(handoffId) as Record<string, unknown>[];
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      id: String(r.id),
+      projectId: String(r.project_id),
+      sourceTaskId: String(r.source_task_id),
+      sourceRole: String(r.source_role) as CrossAgentHandoff["sourceRole"],
+      targetTaskId: String(r.target_task_id),
+      targetRole: String(r.target_role) as CrossAgentHandoff["targetRole"],
+      status: String(r.status) as HandoffStatus,
+      requestSummary: String(r.request_summary),
+      contractDetails: JSON.parse(String(r.contract_details_json || "{}")),
+      resolutionNotes: r.resolution_notes ? String(r.resolution_notes) : undefined,
+      createdAt: String(r.created_at),
+      resolvedAt: r.resolved_at ? String(r.resolved_at) : undefined,
+    };
+  }
+
   public resolveHandoff(handoffId: string, status: HandoffStatus, resolutionNotes: string): void {
     const now = new Date().toISOString();
     this.db.prepare(`

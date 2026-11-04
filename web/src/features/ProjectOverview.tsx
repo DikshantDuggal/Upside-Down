@@ -3,6 +3,7 @@ import {
   Clock,
   Plus,
   ArrowRight,
+  Rocket,
 } from "lucide-react";
 import type { HackathonProject, ProjectIdea, ArchitectureBlueprint, TaskContractV2, IntegrationReleaseRecord } from "../api/hackathonApi";
 import { Badge } from "../components/ui";
@@ -26,6 +27,7 @@ interface ProjectOverviewProps {
     hostName?: string;
   }) => Promise<void>;
   onNavigateTab: (tab: any) => void;
+  onStartMission?: () => Promise<void>;
 }
 
 export function ProjectOverview({
@@ -36,6 +38,7 @@ export function ProjectOverview({
   release,
   onCreateProject,
   onNavigateTab,
+  onStartMission,
 }: ProjectOverviewProps) {
   const [newProjectModal, setNewProjectModal] = useState(false);
   const [countdown, setCountdown] = useState("23h 54m 12s");
@@ -106,10 +109,22 @@ export function ProjectOverview({
               <Clock size={16} color="#3b82f6" />
               <span>{countdown} remaining</span>
             </div>
-            <button className="button primary small" onClick={() => setNewProjectModal(true)}>
-              <Plus size={14} />
-              New Project
-            </button>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              {project && onStartMission && project.status !== "development" && project.status !== "released" && project.status !== "deployed" && (
+                <button
+                  className="button primary small"
+                  style={{ background: "#2563eb", borderColor: "#1d4ed8" }}
+                  onClick={() => void onStartMission()}
+                >
+                  <Rocket size={14} />
+                  Start Mission
+                </button>
+              )}
+              <button className="button secondary small" onClick={() => setNewProjectModal(true)}>
+                <Plus size={14} />
+                New Project
+              </button>
+            </div>
           </div>
         </div>
 

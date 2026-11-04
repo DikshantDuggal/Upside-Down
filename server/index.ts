@@ -16,6 +16,9 @@ import { SyncEngine } from "./sync/syncEngine.ts";
 import { createApiRouter } from "./api/routes.ts";
 import { ExecutionPipeline } from "./agents/executionPipeline.ts";
 import { AuthManager } from "./core/auth.ts";
+import { createGitHubRuntime } from "./core/github/runtime.ts";
+import { createGitHubRouter } from "./api/githubRoutes.ts";
+import { HackathonRepository } from "./db/hackathonRepository.ts";
 
 export interface ServerInstance {
   app: Express;
@@ -25,6 +28,8 @@ export interface ServerInstance {
   frontendController: FrontendController;
   executionPipeline: ExecutionPipeline;
   authManager: AuthManager;
+  auth?: AuthManager;
+  jobs?: ExecutionPipeline;
 }
 
 export function createServer(dbPath?: string): ServerInstance {
@@ -72,7 +77,13 @@ export function createServer(dbPath?: string): ServerInstance {
 
   const app: Express = express();
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({limit: "1mb", verify: (req, _res, buffer) => {
+    if (req.url === "/api/github/webhook") (req as any).githubRaw = Buffer.from(buffer);
+  }}));
+  const github = createGitHubRuntime(dbPath === ":memory:");
+  app.use("/api/github", createGitHubRouter(github.service, new HackathonRepository(db.getRawDb()), github.pairingKey,
+    (process.env.UD_GITHUB_ALLOWED_ORIGINS ?? "http://127.0.0.1:5180,http://127.0.0.1:5173,http://localhost:5180,http://localhost:5173").split(","), process.env.UD_GITHUB_WEBHOOK_SECRET));
+
 
   // Mount API router
   app.use("/api", createApiRouter(coordinator, syncEngine, frontendController, authManager));

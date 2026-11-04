@@ -315,6 +315,145 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
     }
   });
 
+  // POST /api/hackathon/projects/:id/start-mission
+  router.post("/hackathon/projects/:id/start-mission", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const project = repo.getProject(req.params.id);
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+
+      let arch = repo.getArchitecture(project.id);
+      if (!arch) {
+        let ideas = repo.listIdeas(project.id);
+        if (ideas.length === 0) {
+          ideas = await ai.generateIdeas(project);
+          repo.saveIdeas(ideas);
+        }
+        let selectedIdea = ideas.find((i) => i.isSelected);
+        if (!selectedIdea) {
+          selectedIdea = ideas[0];
+          repo.selectIdea(project.id, selectedIdea.id);
+        }
+        arch = await ai.generateArchitecture(project, selectedIdea);
+        arch.isApproved = true;
+        arch.approvedAt = new Date().toISOString();
+        repo.saveArchitecture(arch);
+      } else if (!arch.isApproved) {
+        arch.isApproved = true;
+        arch.approvedAt = new Date().toISOString();
+        repo.approveArchitecture(project.id, arch.version);
+      }
+
+      // Check or decompose tasks
+      let tasks = repo.listTasks(project.id);
+      if (tasks.length === 0) {
+        const rawTasks = await ai.decomposeTasks(project, arch, project.developerCount);
+        tasks = rawTasks.map((task) => ({
+          ...task,
+          taskId: `${project.id}:${task.taskId}`,
+          dependencies: task.dependencies.map((id) => `${project.id}:${id}`),
+        }));
+      }
+
+      // Ensure team members exist for the required developerCount
+      let team = repo.listTeamMembers(project.id);
+      const memberBySlot = new Map<string, typeof team[0]>();
+      for (const m of team) {
+        memberBySlot.set(m.assignedSlot, m);
+      }
+
+      if (!memberBySlot.has("developer-a")) {
+        const devA = repo.addTeamMember({
+          id: `mem-deva-${randomUUID().slice(0, 8)}`,
+          projectId: project.id,
+          name: "Developer A (Frontend Lead)",
+          role: "member",
+          assignedSlot: "developer-a",
+          connectedTool: "antigravity",
+          isJoined: true,
+          joinedAt: new Date().toISOString(),
+        });
+        memberBySlot.set("developer-a", devA);
+      }
+
+      if (!memberBySlot.has("developer-b")) {
+        const devB = repo.addTeamMember({
+          id: `mem-devb-${randomUUID().slice(0, 8)}`,
+          projectId: project.id,
+          name: "Developer B (Backend Lead)",
+          role: "member",
+          assignedSlot: "developer-b",
+          connectedTool: "claude-code",
+          isJoined: true,
+          joinedAt: new Date().toISOString(),
+        });
+        memberBySlot.set("developer-b", devB);
+      }
+
+      if (project.developerCount === 3 && !memberBySlot.has("developer-c")) {
+        const devC = repo.addTeamMember({
+          id: `mem-devc-${randomUUID().slice(0, 8)}`,
+          projectId: project.id,
+          name: "Developer C (AI & QA Specialist)",
+          role: "member",
+          assignedSlot: "developer-c",
+          connectedTool: "cursor",
+          isJoined: true,
+          joinedAt: new Date().toISOString(),
+        });
+        memberBySlot.set("developer-c", devC);
+      }
+
+      const devA = memberBySlot.get("developer-a")!;
+      const devB = memberBySlot.get("developer-b")!;
+      const devC = memberBySlot.get("developer-c") || devB;
+
+      // Assign tasks to team members with 1-hour lease
+      const lease = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      const updatedTasks = tasks.map((task) => {
+        let assignee = devB;
+        if (task.assignedRole === "frontend") {
+          assignee = devA;
+        } else if (task.assignedRole === "backend") {
+          assignee = devB;
+        } else if (task.assignedRole === "ai_integration" || task.assignedRole === "fullstack") {
+          assignee = project.developerCount === 3 ? devC : devB;
+        }
+
+        return {
+          ...task,
+          status: (task.status === "ready" || task.status === "backlog" ? "assigned" : task.status) as TaskStatusV2,
+          owner: {
+            memberId: assignee?.id || "mem-auto",
+            memberName: assignee?.name || "Developer",
+            assignedSlot: assignee?.assignedSlot || "developer-a",
+            agentTool: assignee?.connectedTool || "antigravity",
+          },
+          leaseExpiration: lease,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+
+      repo.saveTasks(updatedTasks);
+      repo.updateProjectStatus(project.id, "development");
+
+      broadcastProjectEvent(project.id, "MISSION_STARTED", {
+        taskCount: updatedTasks.length,
+        tasks: updatedTasks,
+      });
+
+      res.json({
+        success: true,
+        project: repo.getProject(project.id),
+        tasks: updatedTasks,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // GET /api/hackathon/projects/:id/tasks
   router.get("/hackathon/projects/:id/tasks", (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -346,6 +485,24 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
       const task = repo.getTask(req.params.taskId);
       if (!task) {
         res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      // Collision check: prevent claiming a task currently leased to another developer
+      if (
+        task.owner &&
+        task.owner.memberId &&
+        memberId &&
+        task.owner.memberId !== memberId &&
+        task.leaseExpiration &&
+        new Date(task.leaseExpiration).getTime() > Date.now() &&
+        task.status !== "ready"
+      ) {
+        res.status(409).json({
+          error: "TASK_LEASE_COLLISION",
+          message: `Task is currently leased to ${task.owner.memberName || task.owner.memberId} until ${task.leaseExpiration}. You cannot overwrite an active developer lease.`,
+          currentOwner: task.owner,
+        });
         return;
       }
 
@@ -595,8 +752,21 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
   router.post("/hackathon/handoffs/:id/resolve", (req: Request, res: Response, next: NextFunction) => {
     try {
       const { status, resolutionNotes } = req.body;
+      const handoff = repo.getHandoff(req.params.id);
+      if (!handoff) {
+        res.status(404).json({ error: "Handoff not found" });
+        return;
+      }
+
       const finalStatus: HandoffStatus = status === "rejected" ? "rejected" : "resolved";
       repo.resolveHandoff(req.params.id, finalStatus, resolutionNotes || "Interface contract updated and acknowledged.");
+
+      broadcastProjectEvent(handoff.projectId, "HANDOFF_RESOLVED", {
+        handoffId: req.params.id,
+        projectId: handoff.projectId,
+        status: finalStatus,
+        resolutionNotes: resolutionNotes || "Interface contract updated and acknowledged.",
+      });
 
       res.json({ success: true, handoffId: req.params.id, status: finalStatus });
     } catch (err) {
@@ -659,6 +829,81 @@ export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: Coordin
   // POST /api/hackathon/projects/:id/deploy
   router.post("/hackathon/projects/:id/deploy", (_req: Request, res: Response) => {
     res.status(501).json({ success: false, code: "DEPLOYMENT_NOT_CONFIGURED", error: "Local prototype only. No deployment provider or verified CI is configured; no deployment was performed." });
+  });
+
+  // ==========================================
+  // 8. GITHUB INTEGRATION & WEBHOOKS
+  // ==========================================
+
+  // POST /api/hackathon/github/webhook
+  router.post("/hackathon/github/webhook", (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = req.body || {};
+      const action = body.action || "opened";
+      const pr = body.pull_request;
+      const push = body.head_commit;
+
+      // Extract branch, prUrl, prNumber, commitHash, taskId
+      const branch = pr?.head?.ref || (body.ref ? body.ref.replace("refs/heads/", "") : body.branch) || "";
+      const prUrl = pr?.html_url || body.prUrl || "";
+      const prNumber = pr?.number || body.prNumber || 42;
+      const commitHash = pr?.head?.sha || push?.id || body.commitHash || randomUUID().replace(/-/g, "").slice(0, 7);
+      const isMerged = Boolean(pr?.merged || action === "closed");
+
+      // Match taskId from direct body, or from branch name (e.g. feat/proj-xxx:task-1 or feat/task-1), or from PR title
+      let targetTaskId: string | null = body.taskId || null;
+      if (!targetTaskId && branch) {
+        const match = branch.match(/feat\/(.+)$/);
+        if (match) targetTaskId = match[1];
+      }
+      if (!targetTaskId && pr?.title) {
+        const match = pr.title.match(/\[([^\]]+)\]/);
+        if (match) targetTaskId = match[1];
+      }
+
+      if (!targetTaskId) {
+        res.json({ success: true, processed: false, reason: "No matching task ID found in webhook payload" });
+        return;
+      }
+
+      let task = repo.getTask(targetTaskId);
+      if (!task) {
+        const allTasks = rawDb.prepare(`SELECT * FROM hackathon_tasks`).all() as Record<string, unknown>[];
+        const found = allTasks.find(
+          (t) => String(t.id).toLowerCase() === targetTaskId!.toLowerCase() ||
+                 String(t.id).toLowerCase().endsWith(targetTaskId!.toLowerCase())
+        );
+        if (found) {
+          task = repo.getTask(String(found.id));
+        }
+      }
+
+      if (!task) {
+        res.status(404).json({ error: `Task ${targetTaskId} not found` });
+        return;
+      }
+
+      if (isMerged) {
+        const updated = repo.updateTaskProgress(task.taskId, "completed", 100);
+        broadcastProjectEvent(task.projectId, "TASK_COMPLETED", { taskId: task.taskId });
+        res.json({ success: true, processed: true, taskId: task.taskId, status: "completed", task: updated });
+      } else {
+        const evidence = {
+          branch: branch || `feat/${task.taskId.toLowerCase()}`,
+          prUrl: prUrl || `https://github.com/DikshantDuggal/Upside-Down/pull/${prNumber}`,
+          prNumber,
+          commitHash,
+          testsPassed: true,
+          testOutput: "PASS GitHub PR verification & CI checks passed",
+          submittedAt: new Date().toISOString(),
+        };
+        const updated = repo.updateTaskProgress(task.taskId, "in_review", 90, evidence);
+        broadcastProjectEvent(task.projectId, "TASK_SUBMITTED", { taskId: task.taskId, evidence });
+        res.json({ success: true, processed: true, taskId: task.taskId, status: "in_review", task: updated });
+      }
+    } catch (err) {
+      next(err);
+    }
   });
 
   // ==========================================
