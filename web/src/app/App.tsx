@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleHelp,
+  ClipboardCheck,
   Command as CommandIcon,
   FileCode2,
   GitCompareArrows,
@@ -69,6 +70,7 @@ const pages = [
   { id: "learn", label: "Inside the app", Icon: CircleHelp },
   { id: "overview", label: "Overview", Icon: LayoutDashboard },
   { id: "tasks", label: "Tasks", Icon: ListTodo },
+  { id: "assign", label: "Assign a task", Icon: ClipboardCheck },
   { id: "agents", label: "Agents", Icon: Bot },
   { id: "activity", label: "Activity", Icon: Activity },
   { id: "reviews", label: "Patch reviews", Icon: GitPullRequest },
@@ -110,6 +112,11 @@ const copy: Record<
     title: "A little clarity. A lot of progress.",
     description:
       "Canonical tasks and revisions, with local proposals kept separate.",
+  },
+  assign: {
+    eyebrow: "ASSIGN WORK WITH CLARITY",
+    title: "One laptop. One clear responsibility.",
+    description: "Choose a task and assign one of the four project roles.",
   },
   agents: {
     eyebrow: "YOUR EXTENDED TEAM",
