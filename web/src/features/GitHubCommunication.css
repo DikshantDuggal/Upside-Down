@@ -1,46 +1,12 @@
-/* Scoped to the approved communication page and its navigation. */
-.app-shell:has(.github-communication) .app-header {
-  display: flex; align-items: center; justify-content: space-between; gap: 20px;
-  padding: 20px 28px; border-bottom: 1px solid var(--border); background: white;
-}
-.app-shell:has(.github-communication) .header-brand,
-.app-shell:has(.github-communication) .header-actions {
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-}
-.app-shell:has(.github-communication) .header-actions { justify-content: flex-end; }
-.app-shell:has(.github-communication) .brand { color: var(--ink); display: flex; gap: 10px; align-items: center; }
-.app-shell:has(.github-communication) .brand-name { font-weight: 750; font-size: 16px; }
-.app-shell:has(.github-communication) .brand-tag { display: none; }
-.app-shell:has(.github-communication) .menu-button { display: none; }
-.app-shell:has(.github-communication) .app-body { display: grid; grid-template-columns: 244px minmax(0,1fr); }
-.app-shell:has(.github-communication) .app-nav { padding: 28px 16px; background: white; border-right: 1px solid var(--border); }
-.app-shell:has(.github-communication) .nav-header { padding: 0 12px 18px; }
-.app-shell:has(.github-communication) .nav-list { display: grid; gap: 5px; }
-.app-shell:has(.github-communication) .nav-item {
-  display: flex; align-items: center; gap: 10px; padding: 12px; text-align: left;
-  border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px;
-}
-.app-shell:has(.github-communication) .nav-item:hover { background: var(--canvas); }
-.app-shell:has(.github-communication) .nav-item.active { background: #e9f0e7; color: #2d5336; font-weight: 700; }
-.app-shell:has(.github-communication) .app-content { min-width: 0; padding: 30px; }
-.app-shell:has(.github-communication) .content-hero { margin-bottom: 28px; }
 .github-communication .panel { padding: 18px; margin-bottom: 14px; }
 .github-communication .panel h3 { margin: 0 0 12px; }
 .github-communication h3 { margin: 26px 0 14px; }
 .github-communication .section-head { flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
 .github-communication .action-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.github-communication a { color: #315e43; text-decoration: underline; text-underline-offset: 3px; }
+.github-communication a { color: var(--green); text-decoration: underline; text-underline-offset: 3px; }
 .github-communication p, .github-communication code, .github-communication pre { overflow-wrap: anywhere; }
 .github-communication .form-stack { display: grid; gap: 14px; }
 .github-communication label { display: grid; gap: 7px; }
 .github-communication summary { cursor: pointer; }
 .github-communication .notice { margin-bottom: 14px; }
-@media (max-width: 1000px) {
-  .app-shell:has(.github-communication) .app-body { grid-template-columns: minmax(0,1fr); }
-  .app-shell:has(.github-communication) .app-header { padding: 16px; flex-wrap: wrap; }
-  .app-shell:has(.github-communication) .header-actions { justify-content: flex-start; }
-  .app-shell:has(.github-communication) .app-nav { display: none; }
-  .app-shell:has(.github-communication) .app-nav.open { display: block; }
-  .app-shell:has(.github-communication) .menu-button { display: inline-flex; background: white; border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
-  .app-shell:has(.github-communication) .app-content { padding: 20px 16px; }
-}
+

@@ -92,8 +92,8 @@ const copy: Record<
 > = {
   overview: {
     eyebrow: "AI HACKATHON MISSION CONTROL",
-    title: "Good things happen together.",
-    description: "Autonomous multi-agent orchestration from problem statement to deployable release.",
+    title: "Build something extraordinary.",
+    description: "Your ideas, your team, your next breakthrough. All in one workspace.",
   },
   ideas: {
     eyebrow: "STAGE 1 — CONCEPT SYNTHESIS",
@@ -177,6 +177,8 @@ export function App() {
   const [actionError, setActionError] = useState("");
 
   // --- UPSIDE-DOWN 2.0 HACKATHON STATE ---
+  const [projects, setProjects] = useState<HackathonProject[]>([]);
+  const [backendState, setBackendState] = useState("Connecting…");
   const [project, setProject] = useState<HackathonProject | null>(null);
   const [ideas, setIdeas] = useState<ProjectIdea[]>([]);
   const [selectedIdea, setSelectedIdea] = useState<ProjectIdea | null>(null);
@@ -219,9 +221,11 @@ export function App() {
   // Load or initialize default Hackathon Project
   const loadProjectData = useCallback(async (projectId?: string) => {
     try {
-      let targetId = projectId;
+      const listRes = await hackathonApi.listProjects();
+      setProjects(listRes.projects);
+      let targetId = projectId ?? (listRes.projects.find(p=>p.id===localStorage.getItem("upside-down:active-project"))?.id);
       if (!targetId) {
-        const listRes = await hackathonApi.listProjects();
+
         if (listRes.projects && listRes.projects.length > 0) {
           targetId = listRes.projects[0].id;
         } else {
@@ -243,6 +247,8 @@ export function App() {
       if (targetId) {
         const full = await hackathonApi.getProject(targetId);
         setProject(full.project);
+        localStorage.setItem("upside-down:active-project", targetId);
+        setBackendState("Backend connected");
         setIdeas(full.ideas || []);
         setSelectedIdea(full.selectedIdea || null);
         setArchitecture(full.architecture || null);
@@ -256,7 +262,8 @@ export function App() {
         setFeedbackMessages(fbRes.messages || []);
       }
     } catch (err) {
-      console.error("Failed to load hackathon project data:", err);
+      setBackendState("Backend unavailable");
+      setActionError(err instanceof Error ? err.message : "Could not load project. Check the backend and retry Sync.");
     }
   }, []);
 
@@ -503,9 +510,16 @@ export function App() {
     };
   }, [journal, data.pending]);
 
-  const unavailable = !journal
+  // Auto-refresh dashboard when local session connects
+  useEffect(() => {
+    if (localSession.status === "paired") {
+      void data.refresh();
+    }
+  }, [localSession.status, data.refresh]);
+
+  const unavailable = (!journal && data.mode === "unavailable")
     ? "The local service is unavailable. No command has been queued."
-    : localSession.status !== "paired" && localSession.status !== "unsupported"
+    : (data.mode === "local" && localSession.status !== "paired" && localSession.status !== "unsupported")
       ? "Pair this browser with the local service before submitting a command."
       : storageError
         ? "Browser retry records could not be saved. Resolve storage access before submitting."
@@ -513,9 +527,70 @@ export function App() {
 
   const submit = useCallback(
     async (command: Command) => {
-      if (!journal || unavailable)
-        throw new Error(unavailable ?? "The local service is unavailable.");
+      if (unavailable)
+        throw new Error(unavailable);
       setActionError("");
+
+      // Direct coordinator submission if offline local journal is not instantiated
+      if (!journal || data.mode === "legacy") {
+        if (command.type === "task.create") {
+          const res = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: command.payload.title,
+              description: command.payload.description,
+              ownerId: command.payload.ownerId,
+              projectId: project?.id || "proj-upside-down",
+            }),
+          });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.error || errBody.message || "Failed to create task on coordinator");
+          }
+          const created = await res.json();
+          setNotice(`Task created on coordinator: "${created.title}".`);
+          void data.refresh();
+          if (project?.id) void loadProjectData(project.id);
+          return;
+        }
+        if (command.type === "task.transition") {
+          const res = await fetch(`/api/tasks/${command.taskId}/transition`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(command.payload),
+          });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.error || errBody.message || "Failed to transition task on coordinator");
+          }
+          setNotice(`Task transitioned to ${command.payload.targetStatus}.`);
+          void data.refresh();
+          return;
+        }
+        if (command.type === "message.send") {
+          const res = await fetch("/api/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "message",
+              payload: command.payload,
+            }),
+          });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.error || errBody.message || "Failed to send message on coordinator");
+          }
+          setNotice("Message sent.");
+          void data.refresh();
+          return;
+        }
+      }
+
+      if (!journal) {
+        throw new Error(unavailable ?? "Local journal is not initialized.");
+      }
+
       if (
         command.type === "task.transition" &&
         transitionBlocked(
@@ -557,7 +632,7 @@ export function App() {
         throw err;
       }
     },
-    [journal, unavailable, data.refresh, data.pending, data.tasks],
+    [journal, unavailable, data.refresh, data.pending, data.tasks, data.mode, project?.id, loadProjectData],
   );
 
   async function retry(intent: Intent) {
@@ -594,20 +669,23 @@ export function App() {
           <button
             className="menu-button"
             aria-label="Toggle navigation menu"
+            aria-expanded={menuOpen}
             onClick={() => setMenuOpen(!menuOpen)}
           >
             <Menu size={20} />
           </button>
           <div className="brand" onClick={() => navigate("overview")} style={{ cursor: "pointer" }}>
             <span className="brand-mark">↕</span>
-            <span className="brand-name">UPSIDE DOWN 2.0</span>
+            <span className="brand-name">upside down<span style={{color:"#a77cde"}}> / </span></span>
             <span className="brand-tag">MISSION CONTROL</span>
           </div>
         </div>
 
         <div className="header-actions">
+          <span className="small muted" role="status">{backendState}</span>
+          <select aria-label="Active project" value={project?.id ?? ""} onChange={e=>void loadProjectData(e.target.value)}>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span className="small muted">View as:</span>
+            <span className="small muted">Work view:</span>
             <select
               value={activeIdentity}
               onChange={(e) => setActiveIdentity(e.target.value as any)}
@@ -656,6 +734,7 @@ export function App() {
               <button
                 key={id}
                 className={`nav-item ${page === id ? "active" : ""}`}
+                aria-current={page === id ? "page" : undefined}
                 onClick={() => navigate(id)}
               >
                 <Icon size={18} />
