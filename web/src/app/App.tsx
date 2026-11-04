@@ -56,7 +56,12 @@ import {
   Timestamp,
 } from "../components/ui";
 
+import { DemoEntry, DemoWorkspace } from "../features/demo/DemoWorkspace";
+
 const pages = [
+  { id: "studio", label: "Build studio", Icon: FileCode2 },
+  { id: "prompts", label: "Prompt vault", Icon: CommandIcon },
+  { id: "learn", label: "Inside the app", Icon: CircleHelp },
   { id: "overview", label: "Overview", Icon: LayoutDashboard },
   { id: "tasks", label: "Tasks", Icon: ListTodo },
   { id: "agents", label: "Agents", Icon: Bot },
@@ -71,6 +76,24 @@ const copy: Record<
   Page,
   { eyebrow: string; title: string; description: string }
 > = {
+  studio: {
+    eyebrow: "THE HACKATHON STUDIO",
+    title: "Big ideas start here.",
+    description:
+      "A shared vision, a clear architecture, and a role for every laptop.",
+  },
+  prompts: {
+    eyebrow: "THE TEAM HANDOFF",
+    title: "Clarity for every collaborator.",
+    description:
+      "Shared context. Individual responsibilities. Ready-to-share prompt packs.",
+  },
+  learn: {
+    eyebrow: "INSIDE YOUR PROJECT",
+    title: "Understand what you build.",
+    description:
+      "See the architecture in motion, explore the concepts, and tell your story.",
+  },
   overview: {
     eyebrow: "YOUR LOCAL-FIRST WORKSPACE",
     title: "Good things happen together.",
@@ -119,7 +142,7 @@ const copy: Record<
   },
 };
 function initialPage(): Page {
-  const value = window.location.hash.slice(1);
+  const value = window.location.hash.slice(1).split("?")[0];
   return pages.some((page) => page.id === value) ? (value as Page) : "overview";
 }
 
@@ -132,6 +155,7 @@ export function App() {
     if (session.csrfToken) void data.refresh();
   }, [session.csrfToken, data.refresh]);
   const [page, setPage] = useState<Page>(initialPage);
+  const isDemo = page === "studio" || page === "prompts" || page === "learn";
   const [sidebar, setSidebar] = useState(false);
   const [taskId, setTaskId] = useState<string>();
   const [patch, setPatch] = useState<Patch>();
@@ -476,73 +500,89 @@ export function App() {
               <h1>{copy[page].title}</h1>
               <p>{copy[page].description}</p>
             </div>
-            <button
-              className="button primary new-task"
-              onClick={() => setCreating(true)}
-            >
-              <Plus size={17} />
-              New task
-            </button>
-          </div>
-          <div className="status-strip">
-            <div>
-              <span
-                className={`connection-dot ${data.stale ? "dot-amber" : "dot-green"}`}
-              />
-              <span>
-                {data.loading
-                  ? "Loading workspace"
-                  : data.stale
-                    ? "Stale or unavailable snapshot"
-                    : "Snapshot refreshed"}
-                {data.refreshedAt && (
-                  <>
-                    {" "}
-                    · <Timestamp value={data.refreshedAt} />
-                  </>
-                )}
-              </span>
-            </div>
-            <button className="inline-link" onClick={() => navigate("network")}>
-              {data.mode === "local"
-                ? "Local service"
-                : data.mode === "legacy"
-                  ? "Legacy read mode"
-                  : "Services unavailable"}
-              <ArrowUpRight size={13} />
-            </button>
-          </div>
-          {localSession.status === "required" && (
-            <Notice>
-              Pair this browser to open the local workspace.{" "}
-              <button className="inline-link" onClick={() => setPairing(true)}>
-                Pair browser
-              </button>
-            </Notice>
-          )}
-          {data.error && <Notice danger>{data.error}</Notice>}
-          {notice && (
-            <div className="notice dismissible" role="status">
-              <span>{notice}</span>
+            {!isDemo && (
               <button
-                className="icon-button"
-                aria-label="Dismiss notification"
-                onClick={() => setNotice("")}
+                className="button primary new-task"
+                onClick={() => setCreating(true)}
               >
-                <X size={16} />
+                <Plus size={17} />
+                New task
               </button>
-            </div>
+            )}
+          </div>
+          {!isDemo && (
+            <>
+              <div className="status-strip">
+                <div>
+                  <span
+                    className={`connection-dot ${data.stale ? "dot-amber" : "dot-green"}`}
+                  />
+                  <span>
+                    {data.loading
+                      ? "Loading workspace"
+                      : data.stale
+                        ? "Stale or unavailable snapshot"
+                        : "Snapshot refreshed"}
+                    {data.refreshedAt && (
+                      <>
+                        {" "}
+                        · <Timestamp value={data.refreshedAt} />
+                      </>
+                    )}
+                  </span>
+                </div>
+                <button
+                  className="inline-link"
+                  onClick={() => navigate("network")}
+                >
+                  {data.mode === "local"
+                    ? "Local service"
+                    : data.mode === "legacy"
+                      ? "Legacy read mode"
+                      : "Services unavailable"}
+                  <ArrowUpRight size={13} />
+                </button>
+              </div>
+              {localSession.status === "required" && (
+                <Notice>
+                  Pair this browser to open the local workspace.{" "}
+                  <button
+                    className="inline-link"
+                    onClick={() => setPairing(true)}
+                  >
+                    Pair browser
+                  </button>
+                </Notice>
+              )}
+              {data.error && <Notice danger>{data.error}</Notice>}
+              {notice && (
+                <div className="notice dismissible" role="status">
+                  <span>{notice}</span>
+                  <button
+                    className="icon-button"
+                    aria-label="Dismiss notification"
+                    onClick={() => setNotice("")}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+              {actionError && <Notice danger>{actionError}</Notice>}
+              {data.historyGap && (
+                <Notice>
+                  Activity history may have gaps after reconnection. Task and
+                  agent snapshots are refreshed; legacy timestamp history does
+                  not guarantee complete replay.
+                </Notice>
+              )}
+            </>
           )}
-          {actionError && <Notice danger>{actionError}</Notice>}
-          {data.historyGap && (
-            <Notice>
-              Activity history may have gaps after reconnection. Task and agent
-              snapshots are refreshed; legacy timestamp history does not
-              guarantee complete replay.
-            </Notice>
+          {isDemo && (
+            <DemoWorkspace page={page as "studio" | "prompts" | "learn"} />
           )}
           {page === "overview" && (
             <>
+              <DemoEntry />
               <div className="stats-grid">
                 {stats.map(({ label, value, Icon, detail, tone, to }) => (
                   <button
