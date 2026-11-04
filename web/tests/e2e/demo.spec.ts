@@ -1,6 +1,20 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test.setTimeout(65000);
+
+test("upload preparation can be cancelled without revealing a plan", async ({ page }) => {
+  await page.goto("/#studio");
+  await page.getByLabel("Upload problem files").setInputFiles({ name: "cancel.pdf", mimeType: "application/pdf", buffer: Buffer.from("demo") });
+  await page.getByRole("button", { name: "Upload & create architecture" }).click();
+  await expect(page.getByRole("button", { name: "Cancel preparation" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Cancel preparation" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Preparing architecture" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Generated architecture" })).toHaveCount(0);
+});
+
 test.beforeEach(async ({ page }) => {
   // The demonstration must work even if both existing services are unavailable.
   await page.route("http://127.0.0.1:5173/local/**", (route) => route.abort());
@@ -16,13 +30,11 @@ test("fixed architecture, upload selection, scoped role packs and teaching journ
   await page
     .getByLabel("Your idea / problem statement")
     .fill("My unrelated custom idea");
-  await page
-    .getByLabel("Upload problem files")
-    .setInputFiles({
-      name: "brief.md",
-      mimeType: "text/markdown",
-      buffer: Buffer.from("Never send this content"),
-    });
+  await page.getByLabel("Upload problem files").setInputFiles({
+    name: "brief.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("Never send this content"),
+  });
   await expect(page.locator(".demo-file-list")).toContainText("brief.md");
   const dropped = await page.evaluateHandle(() => {
     const transfer = new DataTransfer();
@@ -38,8 +50,18 @@ test("fixed architecture, upload selection, scoped role packs and teaching journ
   await page.getByRole("button", { name: "Remove brief.md" }).click();
   await expect(page.locator(".demo-file-list")).not.toContainText("brief.md");
   await page
-    .getByRole("button", { name: "Create architecture", exact: true })
+    .getByRole("button", { name: "Upload & create architecture", exact: true })
     .click();
+  await expect(
+    page.getByRole("dialog", { name: "Preparing architecture" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Generated architecture" }),
+  ).toHaveCount(0);
+  await page.waitForTimeout(20000);
+  await expect(
+    page.getByRole("dialog", { name: "Preparing architecture" }),
+  ).toBeVisible();
   await expect(
     page.getByText("Your reference architecture is ready"),
   ).toBeVisible({ timeout: 10000 });
@@ -76,10 +98,7 @@ test("fixed architecture, upload selection, scoped role packs and teaching journ
   await expect(
     page.getByRole("button", { name: "Demo roles assigned" }),
   ).toBeDisabled();
-  await page.reload();
-  await expect(
-    page.getByRole("button", { name: "Demo roles assigned" }),
-  ).toBeDisabled();
+
   await page.screenshot({
     path: "test-results/demo-prompts.png",
     fullPage: true,
@@ -124,7 +143,10 @@ test("fixed architecture, upload selection, scoped role packs and teaching journ
   await page.screenshot({ path: "test-results/demo-viewport.png" });
   await page.getByRole("button", { name: "Reset walkthrough" }).click();
   await expect(
-    page.getByRole("button", { name: "Create architecture", exact: true }),
+    page.getByRole("button", {
+      name: "Upload & create architecture",
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Generated architecture" }),
@@ -144,12 +166,31 @@ test("four PDF downloads exist, and supplied source documents are served", async
   expect(await architecture.text()).toContain("CoordinatorService");
 });
 
-test("device preview deep link works on a fresh browser", async ({ page }) => {
-  await page.goto("/#prompts?device=P3");
-  await expect(page.getByLabel("Preview access as")).toHaveValue("P3");
-  await expect(page.locator(".demo-laptop")).toHaveCount(1);
+test("fresh page and device link cannot bypass upload gate", async ({
+  page,
+}) => {
+  await page.goto("/#studio");
+  await page.evaluate(() =>
+    localStorage.setItem(
+      "upside-down-demo-v1",
+      JSON.stringify({
+        idea: "old brief",
+        generated: true,
+        assigned: true,
+        tools: {},
+      }),
+    ),
+  );
+  await page.reload();
   await expect(
-    page.getByRole("heading", { name: "api.md", exact: true }),
+    page.getByRole("region", { name: "Generated architecture" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Upload & create architecture" }),
+  ).toBeDisabled();
+  await page.goto("/#prompts?device=P3");
+  await expect(
+    page.getByText("Your prompt vault starts with a plan."),
   ).toBeVisible();
 });
 
@@ -157,11 +198,18 @@ test("mobile demo remains usable and accessible", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/#studio");
   await page
-    .getByRole("button", { name: "Create architecture", exact: true })
+    .getByLabel("Upload problem files")
+    .setInputFiles({
+      name: "mobile.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("demo"),
+    });
+  await page
+    .getByRole("button", { name: "Upload & create architecture", exact: true })
     .click();
   await expect(
     page.getByText("Your reference architecture is ready"),
-  ).toBeVisible({ timeout: 10000 });
+  ).toBeVisible({ timeout: 31000 });
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,

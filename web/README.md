@@ -2,10 +2,14 @@
 
 ## Hackathon presentation demo (issue #13)
 
+Update #19: the default site is now fully backend-free. Overview, tasks, agents, activity, patch reviews, conflicts, team messages and network/queue show labeled sample data with browser-local controls. They make no backend calls and need no pairing. The original integrated workspace remains available at `http://127.0.0.1:5173/?live=1`. Sample dashboard changes last while navigating among those sections; refreshing or leaving the dashboard restores its fixtures.
+
+The studio now requires a selected PDF/Markdown file followed by **Upload & create architecture**. A cancellable 25-second loading screen runs before the fixed plan appears. Fresh page loads and Reset walkthrough always hide the architecture, even when old localStorage says it was generated. Typed text and device preview links cannot bypass this upload gate.
+
 Open `http://127.0.0.1:5173/#studio`. The original overview, tasks, agents, reviews, conflicts, messaging and network screens remain available in the sidebar. The new studio works without a backend or model API.
 
 1. Keep the prefilled AgentSync problem, type a brief, or select / drag in PDF or Markdown files. Selection keeps names and sizes in memory only; file contents are never read or transmitted.
-2. Click **Create architecture**. A timed reveal presents the fixed supplied AgentSync plan. Select any of four modules to explore ownership. Open the complete architecture, contract or common context document.
+2. Click **Upload & create architecture** after selecting a file. After the 25-second reveal, select any of four modules to explore ownership. Open the complete architecture, contract or common context document.
 3. Open **Prompt vault**. The host sees four role cards. **Preview access as** restricts the visible role prompt to one laptop, alongside shared documents. Choose a coding-tool label and download the role's PDF or Markdown. The selector is a demonstration, not authentication; static artifacts are public.
 4. **Ready · assign four roles** simulates assignment and saves state in this browser. No laptop is discovered or contacted, no coding tool executes, and no Git branch is created.
 5. Open **Inside the app** to animate a contract-change journey, explore illustrative files and pseudocode, answer a concept question, and practice presentation notes.
@@ -15,7 +19,7 @@ The one fixed reference is AgentSync: P1 coordinator / SQLite, P2 frontend, P3 A
 
 Downloadable packs live in `web/public/demo/laptop-{a,b,c,d}-pack.pdf`. Each contains its individual prompt, common `context.md`, full supplied `ARCHITECTURE.md`, and full supplied `CONTRACT.md`. Source copies are in `web/src/features/demo/fixtures/`. To regenerate the four PDFs and Markdown handoffs, run `python web/scripts/build-demo-packs.py` with ReportLab installed and Node 24+. The already-generated PDFs need no Python at runtime. Windows Segoe UI / Consolas fonts are embedded when available.
 
-Demo state uses only `upside-down-demo-v1` in localStorage. Uploaded file metadata is not persisted. A fresh-browser URL such as `/#prompts?device=P3` opens the corresponding simulated laptop view. It is a public preview link, not an access token; a localhost URL does not connect another physical laptop.
+Demo preferences use only `upside-down-demo-v1` in localStorage. File metadata and architecture access are not restored on reload. A URL such as `/#prompts?device=P3` selects the laptop preview after this visit's upload gate completes. It is a public preview link, not an access token; a localhost URL does not connect another physical laptop.
 
 For a Wi-Fi presentation, you may explicitly launch `npm --prefix web run dev -- --host 0.0.0.0` and use the host's private LAN IP in each device's preview URL. Windows firewall and network reachability must permit port 5173. This serves static demo views only; role selection and assignments remain browser-local, and real cross-device coordination is not implemented by this demo. Existing backend security rules still apply to the original workspace screens.
 

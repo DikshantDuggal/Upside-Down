@@ -84,7 +84,7 @@ test("real B service: browser pairing, local durable enqueue, restart and receip
         page.getByRole("button", { name: "Local service", exact: true }),
       ).toBeVisible();
     };
-    await page.goto("/");
+    await page.goto("/?live=1");
     await pair();
     const before = (await page.evaluate(async () =>
       (
@@ -122,7 +122,7 @@ test("real B service: browser pairing, local durable enqueue, restart and receip
     expect(hasCredential).toBe(false);
     await stop();
     await start();
-    await page.goto("/");
+    await page.goto("/?live=1");
     await pair();
     await page
       .getByRole("link", { name: "Network & queue", exact: true })

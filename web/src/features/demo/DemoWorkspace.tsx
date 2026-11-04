@@ -41,14 +41,16 @@ type Saved = {
   tools: Record<string, string>;
 };
 const KEY = "upside-down-demo-v1";
+// A new page load always starts behind the upload gate.
+let revealedThisVisit = false;
 function readSaved(): Saved {
   try {
     const value = JSON.parse(localStorage.getItem(KEY) || "null");
     if (value && typeof value.idea === "string")
       return {
         idea: value.idea,
-        generated: value.generated === true,
-        assigned: value.assigned === true,
+        generated: revealedThisVisit,
+        assigned: revealedThisVisit && value.assigned === true,
         tools:
           value.tools && typeof value.tools === "object" ? value.tools : {},
       };
@@ -114,7 +116,7 @@ export function DemoWorkspace({ page }: { page: DemoPage }) {
   const role = roles.find((r) => r.id === node)!;
   const selected =
     roles.find((r) => r.id === (view === "host" ? promptId : view)) || roles[0];
-  const generating = progress >= 0 && progress < 5;
+  const generating = progress >= 0 && progress < 25;
   const visibleRoles =
     view === "host" ? roles : roles.filter((r) => r.id === selected.id);
   useEffect(() => {
@@ -140,7 +142,6 @@ export function DemoWorkspace({ page }: { page: DemoPage }) {
       ).get("device");
       if (device && roles.some((r) => r.id === device)) {
         setView(device);
-        setSaved((s) => ({ ...s, generated: true }));
       }
     };
     update();
@@ -150,10 +151,12 @@ export function DemoWorkspace({ page }: { page: DemoPage }) {
   useEffect(() => {
     if (!generating) return;
     const timer = setTimeout(() => {
-      if (progress === 4)
+      if (progress === 24) {
+        revealedThisVisit = true;
         setSaved((s) => ({ ...s, generated: true, assigned: false }));
+      }
       setProgress((p) => p + 1);
-    }, 620);
+    }, 1000);
     return () => clearTimeout(timer);
   }, [progress, generating]);
   useEffect(() => {
@@ -203,6 +206,7 @@ export function DemoWorkspace({ page }: { page: DemoPage }) {
     }
   }
   function reset() {
+    revealedThisVisit = false;
     setSaved({
       idea: DEMO_PROBLEM,
       generated: false,
@@ -228,6 +232,44 @@ export function DemoWorkspace({ page }: { page: DemoPage }) {
   ];
   return (
     <div className="demo-workspace">
+      {generating && (
+        <div
+          className="demo-loading-screen"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Preparing architecture"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setProgress(-1);
+            if (event.key === "Tab") {
+              event.preventDefault();
+              event.currentTarget.querySelector("button")?.focus();
+            }
+          }}
+        >
+          <div className="demo-loading-card">
+            <div className="demo-loading-icon">
+              <Layers3 size={42} />
+            </div>
+            <span className="demo-kicker">YOUR BRIEF IS TAKING SHAPE</span>
+            <h2>Connecting the pieces.</h2>
+            <p>{buildSteps[Math.min(4, Math.floor(progress / 5))]}</p>
+            <div className="demo-progress-track">
+              <span style={{ width: `${progress * 4}%` }} />
+            </div>
+            <strong>{25 - progress} seconds remaining</strong>
+            <span className="demo-loading-caption">
+              Preparing the fixed AgentSync demo plan for four laptops.
+            </span>
+            <button
+              autoFocus
+              className="button secondary"
+              onClick={() => setProgress(-1)}
+            >
+              Cancel preparation
+            </button>
+          </div>
+        </div>
+      )}
       <div className="demo-toolbar">
         <span className="demo-pill">
           <span /> Scripted demo
@@ -391,10 +433,14 @@ export function DemoWorkspace({ page }: { page: DemoPage }) {
               </p>
               <button
                 className="button primary demo-wide"
-                disabled={
-                  generating || (!saved.idea.trim() && files.length === 0)
-                }
+                disabled={generating || files.length === 0}
                 onClick={() => {
+                  revealedThisVisit = false;
+                  setSaved((s) => ({
+                    ...s,
+                    generated: false,
+                    assigned: false,
+                  }));
                   setProgress(0);
                   setDocument(null);
                 }}
@@ -409,7 +455,7 @@ export function DemoWorkspace({ page }: { page: DemoPage }) {
                     <Sparkles size={17} />
                     {saved.generated
                       ? "Replay architecture reveal"
-                      : "Create architecture"}
+                      : "Upload & create architecture"}
                     <ArrowRight size={17} />
                   </>
                 )}
@@ -454,18 +500,21 @@ export function DemoWorkspace({ page }: { page: DemoPage }) {
                 <Sparkles size={18} />
                 <strong>
                   {generating
-                    ? buildSteps[progress]
+                    ? buildSteps[Math.min(4, Math.floor(progress / 5))]
                     : "Your reference architecture is ready"}
                 </strong>
-                <span>{Math.min(100, progress * 20)}%</span>
+                <span>{Math.min(100, progress * 4)}%</span>
               </div>
               <div className="demo-progress-track">
-                <span style={{ width: `${Math.min(100, progress * 20)}%` }} />
+                <span style={{ width: `${Math.min(100, progress * 4)}%` }} />
               </div>
               <div className="demo-progress-steps">
                 {buildSteps.map((s, i) => (
-                  <span className={progress > i ? "done" : ""} key={s}>
-                    {progress > i ? (
+                  <span
+                    className={progress >= (i + 1) * 5 ? "done" : ""}
+                    key={s}
+                  >
+                    {progress >= (i + 1) * 5 ? (
                       <Check size={12} />
                     ) : (
                       <span className="demo-small-dot" />

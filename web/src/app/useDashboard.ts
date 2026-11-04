@@ -63,7 +63,7 @@ const empty: Dashboard = {
   historyGap: false,
 };
 
-export function useDashboard() {
+export function useDashboard(enabled = true) {
   const [state, setState] = useState<Dashboard>(empty);
   const [generation, setGeneration] = useState(0);
   const stateRef = useRef(state);
@@ -75,6 +75,7 @@ export function useDashboard() {
     { promise: Promise<void>; resolve: () => void } | undefined
   >(undefined);
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     if (active.current) {
       refreshAgain.current = true;
       if (!refreshWaiter.current) {
@@ -254,9 +255,10 @@ export function useDashboard() {
         }
       }
     }
-  }, []);
+  }, [enabled]);
   refreshRef.current = refresh;
   useEffect(() => {
+    if (!enabled) return;
     void refresh();
     const timer = setInterval(() => void refresh(), 15_000);
     return () => {
@@ -267,7 +269,7 @@ export function useDashboard() {
       refreshWaiter.current?.resolve();
       refreshWaiter.current = undefined;
     };
-  }, [refresh]);
+  }, [refresh, enabled]);
   const reset = useCallback(() => {
     setState((previous) => ({
       ...previous,
