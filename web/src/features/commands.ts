@@ -16,12 +16,6 @@ const intentSchema = z.object({
   error: z.string().optional(),
 });
 export type Intent = z.infer<typeof intentSchema>;
-export function isDefinitelyUnsent(error: unknown) {
-  return (
-    error instanceof ApiError &&
-    [400, 401, 403, 404, 405, 413, 415, 422, 426, 429].includes(error.status)
-  );
-}
 const documentSchema = z.object({
   version: z.literal(1),
   intents: z.array(intentSchema),
@@ -86,7 +80,12 @@ export class CommandJournal {
     } catch (error) {
       // Explicit client failures did not queue this request. 408, 409 and server
       // failures keep their original key because an earlier attempt may exist.
-      const certain = !hadAmbiguousAttempt && isDefinitelyUnsent(error);
+      const certain =
+        !hadAmbiguousAttempt &&
+        error instanceof ApiError &&
+        [400, 401, 403, 404, 405, 413, 415, 422, 426, 429].includes(
+          error.status,
+        );
       this.update({
         ...intent,
         delivery: certain ? "unsent" : "unknown",

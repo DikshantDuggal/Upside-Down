@@ -3,7 +3,6 @@ import { z } from "zod";
 import { ApiError, errorMessage, request } from "../api/client";
 import {
   configureBrowserSession,
-  getBrowserSession,
   SESSION_EXPIRED,
   useBrowserSession,
 } from "../api/session";
@@ -13,13 +12,6 @@ import { CONTRACT } from "../api/types";
 const sessionSchema = z.object({
   contractVersion: z.literal(CONTRACT),
   csrfToken: z.string().min(32),
-});
-const authorizationSchema = z.object({
-  contractVersion: z.literal(CONTRACT),
-  authorization: z.object({
-    role: z.enum(["device", "reviewer", "admin"]),
-    canReview: z.boolean(),
-  }),
 });
 export function useLocalSession() {
   const session = useBrowserSession();
@@ -40,8 +32,8 @@ export function useLocalSession() {
       setStatus("paired");
     } catch (err) {
       if (signal?.aborted) return;
-      configureBrowserSession({ canReview: false });
       if (err instanceof ApiError && err.status === 401) {
+        configureBrowserSession({ canReview: false });
         setStatus("required");
       } else {
         setStatus(
@@ -53,49 +45,6 @@ export function useLocalSession() {
       }
     }
   }, []);
-  useEffect(() => {
-    const csrfToken = session.csrfToken;
-    if (!csrfToken) return;
-    const controller = new AbortController();
-    let checking = false;
-    const verify = async () => {
-      if (checking || controller.signal.aborted) return;
-      checking = true;
-      let canReview = false;
-      try {
-        const result = await request(
-          "/local/authorization",
-          authorizationSchema,
-          {
-            signal: controller.signal,
-          },
-        );
-        canReview =
-          !result.stale &&
-          result.value.authorization.canReview &&
-          ["reviewer", "admin"].includes(result.value.authorization.role);
-      } catch {
-        /* Older/unreachable services and revoked credentials stay unprivileged. */
-      } finally {
-        checking = false;
-      }
-      // A response for an expired/replaced session must never resurrect it.
-      if (
-        !controller.signal.aborted &&
-        getBrowserSession().csrfToken === csrfToken
-      )
-        configureBrowserSession({ csrfToken, canReview });
-    };
-    void verify();
-    const timer = window.setInterval(() => void verify(), 30_000);
-    const focused = () => void verify();
-    window.addEventListener("focus", focused);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
-      window.removeEventListener("focus", focused);
-    };
-  }, [session.csrfToken]);
   const pair = useCallback(async (pairingKey: string) => {
     const result = await request("/local/session", sessionSchema, {
       body: { pairingKey },

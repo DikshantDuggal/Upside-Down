@@ -3,7 +3,6 @@ import { Send } from "lucide-react";
 import type { Command, Message } from "../api/types";
 import { errorMessage } from "../api/client";
 import { Empty, Notice, Timestamp, shortId } from "../components/ui";
-import { isDefinitelyUnsent } from "./commands";
 
 export function Messages({
   messages,
@@ -16,7 +15,6 @@ export function Messages({
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
-  const [correctable, setCorrectable] = useState(false);
   const [busy, setBusy] = useState(false);
   async function send(event: FormEvent) {
     event.preventDefault();
@@ -31,7 +29,6 @@ export function Messages({
       setText("");
     } catch (err) {
       setError(errorMessage(err));
-      setCorrectable(isDefinitelyUnsent(err));
     } finally {
       setBusy(false);
     }
@@ -71,10 +68,7 @@ export function Messages({
           <textarea
             rows={3}
             value={text}
-            onChange={(event) => {
-              setText(event.target.value);
-              if (correctable) setError("");
-            }}
+            onChange={(event) => setText(event.target.value)}
             placeholder="Share an update or ask for a review…"
             required
           />
@@ -100,10 +94,7 @@ export function Messages({
         {unavailable && <Notice>{unavailable}</Notice>}
         {error && (
           <Notice danger>
-            {error}{" "}
-            {correctable
-              ? "The local service did not queue this request. Correct the message and try again."
-              : "Retry the saved original request in Network & queue."}
+            {error} Retry the saved original request in Network & queue.
           </Notice>
         )}
       </form>

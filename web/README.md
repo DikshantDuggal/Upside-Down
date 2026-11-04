@@ -53,9 +53,7 @@ window.upsideDownSession?.update({
 });
 ```
 
-The hook accepts no device bearer token. `canReview` is a UI hint; A/B enforce authorization. Pairing initially sets it false, then the frontend requests paired `GET /local/authorization`. B probes the coordinator with its separately configured reviewer credential and returns `{contractVersion,authorization:{role,canReview}}`. Only a fresh explicit reviewer/admin grant enables controls. Missing support, errors, revocation and expired sessions clear the grant. Checks repeat on window focus and every 30 seconds; a late response cannot resurrect an expired session. No reviewer authority is inferred from the device bearer or local pairing. The cookie can be discarded through browser site-data controls; clearing a UI hint is not server-side logout. Never place credentials in `VITE_*`, localStorage, URLs, or the repository.
-
-For the combined local development launcher and current real browser acceptance, see `client-local/README.md` and `client-local/WEBSITE_VALIDATION.md`. `node client-local/scripts/test-website.mjs` exercises the actual authenticated A/B stack with an isolated Git fixture and Chromium, including reviewer run/approval/application and revocation. It uses port 5174 by default so the normal website can stay running.
+The hook accepts no device bearer token. `canReview` is a UI hint; A/B enforce authorization. Normal local pairing always sets `canReview:false`. Reviewer actions remain unavailable until A/B implement and agree their separate reviewer authority. The cookie can be discarded through browser site-data controls; clearing a UI hint is not server-side logout. Never place credentials in `VITE_*`, localStorage, URLs, or the repository.
 
 Online-only runs/decisions/applications/resolutions retain request keys after ambiguous failures and are never enqueued or automatically retried. Retry original values or reconcile the server job before changing an unknown request. Browser storage failures prevent new mutations rather than losing retry keys.
 

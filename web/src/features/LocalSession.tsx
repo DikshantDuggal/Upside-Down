@@ -3,7 +3,6 @@ import { KeyRound, Link2 } from "lucide-react";
 import { errorMessage } from "../api/client";
 import type { useLocalSession } from "../app/useLocalSession";
 import { Badge, Modal, Notice } from "../components/ui";
-import { useBrowserSession } from "../api/session";
 
 export function LocalSessionCard({
   session,
@@ -12,7 +11,6 @@ export function LocalSessionCard({
   session: ReturnType<typeof useLocalSession>;
   open: () => void;
 }) {
-  const browser = useBrowserSession();
   return (
     <section className="panel session-card">
       <div className="session-icon">
@@ -31,9 +29,7 @@ export function LocalSessionCard({
         </div>
         <p>
           {session.status === "paired"
-            ? browser.canReview
-              ? "This browser is paired. Reviewer authority was verified with the coordinator."
-              : "This browser is paired. Reviewer actions require a separately verified credential."
+            ? "This browser has a local session. Reviewer authorization is separate."
             : "Pair with your own local service to read its durable cache and queue commands. Device bearer tokens stay outside the browser."}
         </p>
         {session.error && <p className="small text-red">{session.error}</p>}
