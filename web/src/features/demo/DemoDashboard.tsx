@@ -164,6 +164,8 @@ export const showcaseDescriptions: Record<string, string> = {
     "Your four-laptop team at a glance. Sample activity, progress and shared work.",
   tasks:
     "Explore assignments, add a sample task and move work through the board.",
+  assign:
+    "Choose any project task and assign one of four roles to LAPTOP-SC56F2JK.",
   agents:
     "Four simulated collaborators, with clear roles and shared communication paths.",
   activity: "Follow sample updates as they travel between your team's agents.",
@@ -190,6 +192,9 @@ export function DemoDashboard({ page }: { page: string }) {
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState("");
   const [beat, setBeat] = useState(0);
+  const [assignmentTask, setAssignmentTask] = useState(initialTasks[0].id);
+  const [assignmentRole, setAssignmentRole] = useState("P1");
+  const [assigned, setAssigned] = useState(false);
   useEffect(() => {
     setFilter("All");
     setQuery("");
@@ -476,6 +481,87 @@ export function DemoDashboard({ page }: { page: string }) {
           </div>
           <section className="dd-panel">{taskList()}</section>
         </>
+      )}
+      {page === "assign" && (
+        <section className="dd-panel dd-assignment">
+          <div className="dd-assignment-laptop">
+            <span className="dd-avatar">
+              <Laptop size={26} />
+            </span>
+            <div>
+              <span className="demo-kicker">AVAILABLE DEVICE</span>
+              <h3>LAPTOP-SC56F2JK</h3>
+              <p>Ready for a role and task assignment · demo device</p>
+            </div>
+            <span className="dd-status running">Connected</span>
+          </div>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              setAssigned(true);
+              const task = tasks.find((item) => item.id === assignmentTask);
+              const role = roles.find((item) => item.id === assignmentRole);
+              addEvent(
+                `Assigned ${task?.id} to LAPTOP-SC56F2JK as ${role?.short}`,
+                assignmentRole,
+              );
+              setNotice(
+                `${task?.title} assigned to LAPTOP-SC56F2JK as ${role?.name}.`,
+              );
+            }}
+          >
+            <label>
+              Select task
+              <select
+                aria-label="Task to assign"
+                value={assignmentTask}
+                onChange={(event) => {
+                  setAssignmentTask(event.target.value);
+                  setAssigned(false);
+                }}
+              >
+                {tasks.map((task) => (
+                  <option value={task.id} key={task.id}>
+                    {task.id} — {task.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Select laptop type
+              <select
+                aria-label="Laptop type"
+                value={assignmentRole}
+                onChange={(event) => {
+                  setAssignmentRole(event.target.value);
+                  setAssigned(false);
+                }}
+              >
+                {roles.map((role) => (
+                  <option value={role.id} key={role.id}>
+                    {role.id} — {role.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="button primary" disabled={assigned}>
+              <CheckCheck size={17} />
+              {assigned ? "Task assigned" : "Assign task"}
+            </button>
+          </form>
+          <div className="dd-assignment-summary">
+            <span className="demo-kicker">ASSIGNMENT PREVIEW</span>
+            <strong>
+              {tasks.find((task) => task.id === assignmentTask)?.title}
+            </strong>
+            <span>
+              {roles.find((role) => role.id === assignmentRole)?.name}
+            </span>
+            <code>
+              {roles.find((role) => role.id === assignmentRole)?.paths[0]}
+            </code>
+          </div>
+        </section>
       )}
       {page === "agents" && (
         <>

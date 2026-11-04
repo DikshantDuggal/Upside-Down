@@ -583,6 +583,76 @@
     animation: none !important;
   }
 }
+.dd-assignment {
+  padding: 26px;
+}
+.dd-assignment-laptop {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 22px;
+  background: #edf4e6;
+  border: 1px solid #d1dfc4;
+  border-radius: 11px;
+}
+.dd-assignment-laptop > div {
+  flex: 1;
+}
+.dd-assignment-laptop h3 {
+  font-size: 20px;
+  margin: 6px 0;
+}
+.dd-assignment-laptop p {
+  font-size: 11px;
+  margin: 0;
+}
+.dd-assignment form {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr auto;
+  align-items: end;
+  gap: 16px;
+  margin: 25px 0;
+}
+.dd-assignment form label {
+  font-size: 11px;
+}
+.dd-assignment-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 22px;
+  border: 1px solid #dfe6d8;
+  border-radius: 10px;
+  background: #fafcf7;
+}
+.dd-assignment-summary strong {
+  font-size: 16px;
+}
+.dd-assignment-summary > span:not(.demo-kicker) {
+  font-size: 12px;
+  color: #56684f;
+}
+.dd-assignment-summary code {
+  font-size: 10px;
+}
+@media (max-width: 700px) {
+  .dd-assignment {
+    padding: 17px;
+  }
+  .dd-assignment-laptop {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .dd-assignment-laptop > div {
+    min-width: 180px;
+  }
+  .dd-assignment form {
+    grid-template-columns: 1fr;
+  }
+  .dd-assignment form .button {
+    width: 100%;
+  }
+}
 .demo-loading-screen {
   position: fixed;
   inset: 0;
