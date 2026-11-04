@@ -43,7 +43,7 @@ export function useLocalSession() {
       configureBrowserSession({ canReview: false });
       if (err instanceof ApiError && err.status === 401) {
         // In local development outside tests, attempt auto-pairing with local session key
-        if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
+        if (import.meta.env.MODE !== "test") {
           try {
             const keyRes = await fetch("/dev-pairing-key", { signal });
             if (keyRes.ok) {

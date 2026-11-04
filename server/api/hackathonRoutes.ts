@@ -21,12 +21,22 @@ import { IntegrationEngine } from "../core/integrationEngine.ts";
 import type { CoordinatorService } from "../core/coordinator.ts";
 import type { SupportedCodingTool, TaskStatusV2, HandoffStatus } from "../../contracts/hackathon.ts";
 
-export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: CoordinatorService): Router {
+export function createHackathonRouter(rawDb: DatabaseSync, coordinator?: CoordinatorService, githubManaged?: (projectId:string)=>boolean): Router {
   const router = Router();
   const repo = new HackathonRepository(rawDb);
   const ai = new AICoordinator();
   const promptBridge = new PromptBridgeService();
   const integrationEngine = new IntegrationEngine();
+  router.use((req, res, next) => {
+    if (req.method !== "POST" || !githubManaged) { next(); return; }
+    const projectMatch = req.path.match(/^\/hackathon\/projects\/([^/]+)\/handoffs$/);
+    const taskMatch = req.path.match(/^\/hackathon\/tasks\/([^/]+)\/(claim|progress|submit|approve)$/);
+    const handoffMatch = req.path.match(/^\/hackathon\/handoffs\/([^/]+)\/resolve$/);
+    const projectId = projectMatch ? decodeURIComponent(projectMatch[1]) : taskMatch ? repo.getTask(decodeURIComponent(taskMatch[1]))?.projectId : handoffMatch ? repo.getHandoff(decodeURIComponent(handoffMatch[1]))?.projectId : undefined;
+    if (projectId && githubManaged(projectId)) { res.status(409).json({error:"This mission uses GitHub as communication authority. Use Agent Communication Center or the GitHub CLI bridge."}); return; }
+    next();
+  });
+
 
   // In-memory SSE clients for real-time broadcast
   const sseClients = new Map<string, Set<Response>>();

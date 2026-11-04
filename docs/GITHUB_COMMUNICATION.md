@@ -12,7 +12,7 @@ There is **no direct agent-to-agent networking**, no local WebSocket broker, and
    - One dedicated task issue per contract: `[UD-TASK] <Task Title>` (labeled `ud-task`, assigned to the developer's GitHub handle).
 2. **GitHub Comments for Agent Messages:**
    - All inter-agent and inter-developer communication occurs via GitHub issue comments formatted using the `UD-IC/2.0` protocol.
-3. **Cryptographic Identity Verification:**
+3. **GitHub API Author Verification:**
    - Message senders are validated against the authenticated GitHub API author (`comment.user.id` and `comment.user.login`). Senders specified in comment text are never blindly trusted.
 4. **Isolated Git Branches for Development:**
    - Each task assigns an isolated branch (e.g. `feat/<task-id>`) and allowed file path patterns.

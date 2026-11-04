@@ -25,7 +25,8 @@ export function createApiRouter(
   coordinator: CoordinatorService,
   syncEngine?: SyncEngine,
   frontendController?: FrontendController,
-  authManager?: AuthManager
+  authManager?: AuthManager,
+  githubManaged?: (projectId: string) => boolean
 ): Router {
   const router = Router();
   const auth = authManager || new AuthManager();
@@ -34,7 +35,7 @@ export function createApiRouter(
   router.use(auth.middleware());
 
   // Mount Upside-Down 2.0 Hackathon Mission Control Router
-  router.use(createHackathonRouter(coordinator.getDatabase().getRawDb(), coordinator));
+  router.use(createHackathonRouter(coordinator.getDatabase().getRawDb(), coordinator, githubManaged));
 
   // --- Health Check ---
   router.get("/health", (_req: Request, res: Response) => {

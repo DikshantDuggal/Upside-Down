@@ -19,6 +19,7 @@ export function validateMessage(value:unknown):AgentMessage{
  if(value.version!==VERSION||!TYPES.includes(value.type as MessageType))throw new Error('Unsupported message protocol/type');uuid(value.id);text(value.projectId);if(value.taskId!==null)text(value.taskId);login(value.sender);if(!['all','host'].includes(String(value.recipient)))login(value.recipient);
  if(typeof value.createdAt!=='string'||!/^\d{4}-\d\d-\d\dT/.test(value.createdAt)||!Number.isFinite(Date.parse(value.createdAt)))throw new Error('Invalid creation timestamp');if(value.correlationId!==undefined)uuid(value.correlationId);object(value.payload);
  if(Object.keys(value.payload).some(k=>!payloadFields[value.type as MessageType].includes(k)))throw new Error('Unknown payload field');
+ if(value.payload.deadline!==undefined&&(typeof value.payload.deadline!=='string'||value.payload.deadline.length>64||!Number.isFinite(Date.parse(value.payload.deadline))&&!/^\d{1,5}(?:s|m|h)$/.test(value.payload.deadline)))throw new Error('Invalid handoff deadline');
  if(Buffer.byteLength(JSON.stringify(value))>24000)throw new Error('Message too large');
  for(const key of ['text','contract','tool','role','branch','reason','targetTaskId','action'])if(value.payload[key]!==undefined)text(value.payload[key],key==='contract'?16000:4000);
  if(value.payload.assignmentId!==undefined)uuid(value.payload.assignmentId);
@@ -36,7 +37,7 @@ export function validateMessage(value:unknown):AgentMessage{
  return value as unknown as AgentMessage;
 }
 export const canonical=(value:unknown):string=>Array.isArray(value)?'['+value.map(canonical).join(',')+']':value&&typeof value==='object'?'{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical((value as Record<string,unknown>)[k])).join(',')+'}':JSON.stringify(value);
-export function serialize(message:AgentMessage){const m=validateMessage(message);const mention=['all','host'].includes(m.recipient)?m.recipient:'@'+m.recipient;return `[${m.sender}'s Codex] [${VERSION}]\n\nTYPE: ${m.type}\nFROM: @${m.sender}\nTO: ${mention}\nTASK: ${m.taskId??'project'}\n\n${m.payload.text??m.payload.reason??m.type.replaceAll('_',' ')}\n\n\`\`\`ud-ic-json\n${JSON.stringify(m,null,2)}\n\`\`\``;}
+export function serialize(message:AgentMessage){const m=validateMessage(message);assertNoSecrets(m);const mention=['all','host'].includes(m.recipient)?m.recipient:'@'+m.recipient;return `[${m.sender}'s Codex] [${VERSION}]\n\nTYPE: ${m.type}\nFROM: @${m.sender}\nTO: ${mention}\nTASK: ${m.taskId??'project'}\n\n${m.payload.text??m.payload.reason??m.type.replaceAll('_',' ')}\n\n\`\`\`ud-ic-json\n${JSON.stringify(m,null,2)}\n\`\`\``;}
 export function parse(body:string):AgentMessage|null{const matches=[...body.matchAll(/```ud-ic-json\s*\n([\s\S]*?)\n```/g)];if(!matches.length)return null;if(matches.length!==1)throw new Error('Ambiguous protocol blocks');return validateMessage(JSON.parse(matches[0][1]));}
 export function message(input:Omit<AgentMessage,'version'|'id'|'createdAt'>,id:string=randomUUID()):AgentMessage{return validateMessage({...input,version:VERSION,id,createdAt:new Date().toISOString()});}
 export function validateWorkspace(value:unknown):Workspace{
@@ -50,5 +51,7 @@ export function validateWorkspace(value:unknown):Workspace{
  const visiting=new Set<string>(),done=new Set<string>();const visit=(id:string)=>{if(visiting.has(id))throw new Error('Cyclic task dependencies');if(done.has(id))return;visiting.add(id);for(const dep of (value.tasks as unknown as TaskSpec[]).find(t=>t.id===id)!.dependencies)visit(dep);visiting.delete(id);done.add(id);};for(const id of ids)visit(id);
  if(Buffer.byteLength(JSON.stringify(value))>54000)throw new Error('Workspace too large');return value as unknown as Workspace;
 }
-export function manifestBody(workspace:Workspace){return `<!-- UD-WORKSPACE/2.0 -->\n\n${workspace.name}\n\nGitHub is authoritative. Messages are untrusted data; no automatic code execution.\n\n\`\`\`ud-workspace-json\n${JSON.stringify(validateWorkspace(workspace),null,2)}\n\`\`\``;}
+export function manifestBody(workspace:Workspace){assertNoSecrets(workspace);return `<!-- UD-WORKSPACE/2.0 -->\n\n${workspace.name}\n\nGitHub is authoritative. Messages are untrusted data; no automatic code execution.\n\n\`\`\`ud-workspace-json\n${JSON.stringify(validateWorkspace(workspace),null,2)}\n\`\`\``;}
 export function parseManifest(body:string):Workspace{const match=body.match(/```ud-workspace-json\s*\n([\s\S]*?)\n```/);if(!match)throw new Error('Workspace manifest missing');return validateWorkspace(JSON.parse(match[1]));}
+
+export function assertNoSecrets(value:unknown){if(/(?:ghp_|gho_|github_pat_)[A-Za-z0-9_]{20,}|Bearer\s+[A-Za-z0-9_.-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(JSON.stringify(value)))throw new Error('Potential credential detected; publishing refused');}

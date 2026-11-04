@@ -86,14 +86,76 @@ export function createServer(dbPath?: string): ServerInstance {
 
 
   // Mount API router
-  app.use("/api", createApiRouter(coordinator, syncEngine, frontendController, authManager));
+  app.use("/api", createApiRouter(coordinator, syncEngine, frontendController, authManager, id => github.service.workspaces().some(item => item.workspace.projectId === id)));
 
   // Serve active Frontend assets
-  const activePublicDir = frontendController.getActivePublicDir();
-  app.use(express.static(activePublicDir));
+  // Support dev pairing key endpoint on port 4000
+  app.get("/dev-pairing-key", (_req, res) => {
+    try {
+      const candidates = [
+        process.env.UD_DEVICE_DB ? `${process.env.UD_DEVICE_DB}.session.json` : "",
+        path.resolve(process.cwd(), "client-local/data/device-b.db.session.json"),
+        path.resolve(process.cwd(), "client-local/data/device.db.session.json"),
+        path.resolve(process.env.LOCALAPPDATA || "", "UpsideDown/computer-2/device.db.session.json"),
+        path.resolve(process.env.LOCALAPPDATA || "", "UpsideDown/device.db.session.json"),
+      ].filter(Boolean);
+      for (const file of candidates) {
+        if (fs.existsSync(file)) {
+          const data = fs.readFileSync(file, "utf8");
+          res.setHeader("Content-Type", "application/json");
+          res.send(data);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    res.status(404).json({ error: "Session key not found" });
+  });
+
+  // Forward /local requests to client-local service (port 4100)
+  app.all("/local*", async (req, res) => {
+    try {
+      const localPort = process.env.UD_LOCAL_PORT ?? "4100";
+      const targetUrl = `http://127.0.0.1:${localPort}${req.url}`;
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (typeof v === "string" && k.toLowerCase() !== "host") {
+          headers[k] = v;
+        }
+      }
+      headers["origin"] = headers["origin"] || `http://127.0.0.1:4000`;
+      const fetchOpts: RequestInit = {
+        method: req.method,
+        headers,
+      };
+      if (!["GET", "HEAD"].includes(req.method) && req.body && Object.keys(req.body).length > 0) {
+        fetchOpts.body = JSON.stringify(req.body);
+      }
+      const resp = await fetch(targetUrl, fetchOpts);
+      res.status(resp.status);
+      resp.headers.forEach((v, k) => {
+        if (!["content-encoding", "transfer-encoding"].includes(k.toLowerCase())) {
+          res.setHeader(k, v);
+        }
+      });
+      const data = await resp.arrayBuffer();
+      res.send(Buffer.from(data));
+    } catch (err) {
+      res.status(502).json({ error: "Client-local service unreachable", details: String(err) });
+    }
+  });
+
+  // Serve active Frontend assets dynamically
+  app.use((req, res, next) => {
+    const activePublicDir = frontendController.getActivePublicDir();
+    express.static(activePublicDir)(req, res, next);
+  });
+
   app.use(express.static(path.resolve(process.cwd(), "public")));
 
-  app.get("/", (_req, res) => {
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path.startsWith("/local") || req.path.startsWith("/dev-pairing-key")) return next();
     const htmlPath = path.join(frontendController.getActivePublicDir(), "index.html");
     if (fs.existsSync(htmlPath)) {
       res.sendFile(htmlPath);

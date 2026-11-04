@@ -78,7 +78,9 @@ export class GitHubCoordination {
   const raw:RemoteComment[]=snapshot.messages.map(item=>({id:item.sourceId,body:(()=>{const {sourceId,url,author,...message}=item;return (requireSerialize(message as AgentMessage));})(),user:{login:item.author,id:item.author.toLowerCase()===record.workspace.host.login.toLowerCase()?record.workspace.host.id:record.workspace.members.find(x=>same(x.login,item.author))!.id},created_at:item.createdAt,updated_at:item.createdAt,html_url:item.url,issue:snapshot.tasks.find(t=>t.id===item.taskId)?.issue??record.issue}));
   const checked=reduce(record.workspace,record.issue,[...raw,synthetic],Object.fromEntries(snapshot.tasks.filter(t=>t.submission&&t.pr).map(t=>[t.submission!.id,t.pr!])));
   const decision=checked.audit.find(item=>item.sourceId===synthetic.id);if(decision?.decision!=='accepted'&&decision?.decision!=='duplicate')throw new Error(decision?.reason??'Message rejected');
-  return this.transport(repo).send(m,issue);
+  const posted=await this.transport(repo).send(m,issue);
+  if(m.type==='TASK_ASSIGNMENT')await this.api.request('PATCH',`/repos/${repo}/issues/${issue}`,{assignees:[m.payload.assignee]});
+  return posted;
  }
  async assign(repo:string,id:string,taskId:string,assignee:string,branch:string){const snapshot=await this.poll(repo,id),user=await this.identity();if(user.id!==snapshot.workspace.host.id)throw new Error('Only host may reassign');const task=snapshot.tasks.find(t=>t.id===taskId);if(!task?.issue)throw new Error('Task issue missing');login(assignee);
   if(!snapshot.workspace.members.some(m=>same(m.login,assignee)))throw new Error('Assignee is outside approved team');
@@ -87,17 +89,22 @@ export class GitHubCoordination {
  }
  async inspectPr(transport:GitHubTransport,workspace:Workspace,taskId:string,assignee:string,branch:string,submission:AgentMessage):Promise<PrEvidence>{
   const number=Number(submission.payload.prNumber),pr=(await transport.read<any>(`/repos/${workspace.repo}/pulls/${number}`)).data;
-  const files=(await transport.pages<any>(`/repos/${workspace.repo}/pulls/${number}/files`)).map(f=>f.filename as string),commits=await transport.pages<any>(`/repos/${workspace.repo}/pulls/${number}/commits`),reviews=await transport.pages<any>(`/repos/${workspace.repo}/pulls/${number}/reviews`);
-  const checkPage=(await transport.read<any>(`/repos/${workspace.repo}/commits/${pr.head.sha}/check-runs?per_page=100`)).data;
+  const fileRecords=await transport.pages<any>(`/repos/${workspace.repo}/pulls/${number}/files`),files=fileRecords.flatMap(f=>[f.filename,...(f.previous_filename?[f.previous_filename]:[])] as string[]),commits=await transport.pages<any>(`/repos/${workspace.repo}/pulls/${number}/commits`),reviews=await transport.pages<any>(`/repos/${workspace.repo}/pulls/${number}/reviews`);
+  const checkRuns:any[]=[];let checkPage:any;for(let page=1;page<=20;page++){
+   const result=await transport.read<any>(`/repos/${workspace.repo}/commits/${pr.head.sha}/check-runs?per_page=100&page=${page}`);checkPage=result.data;
+   if(!Array.isArray(checkPage.check_runs))throw new Error('Invalid check-run response');checkRuns.push(...checkPage.check_runs);
+   if(!result.headers.link?.includes('rel="next"'))break;if(page===20)throw new Error('Check-run pagination bound exceeded');
+  }
+  if(typeof checkPage.total_count==='number'&&checkRuns.length<checkPage.total_count)throw new Error('Incomplete CI check listing');
   const statuses=(await transport.read<any>(`/repos/${workspace.repo}/commits/${pr.head.sha}/status`)).data;
-  const checks=[...(checkPage.check_runs??[]).map((c:any)=>({name:c.name,status:c.status,conclusion:c.conclusion})),...(statuses.statuses??[]).map((c:any)=>({name:c.context,status:c.state==='pending'?'in_progress':'completed',conclusion:c.state==='success'?'success':c.state==='pending'?null:'failure'}))];
+  const checks=[...checkRuns.map((c:any)=>({name:c.name,status:c.status,conclusion:c.conclusion})),...(statuses.statuses??[]).map((c:any)=>({name:c.context,status:c.state==='pending'?'in_progress':'completed',conclusion:c.state==='success'?'success':c.state==='pending'?null:'failure'}))];
   const problems:string[]=[],spec=workspace.tasks.find(t=>t.id===taskId)!;
   if(!same(pr.user.login,assignee))problems.push('PR author differs from task owner');if(pr.head.ref!==branch||pr.base.ref!==workspace.baseBranch)problems.push('PR branch/base mismatch');if(pr.head.repo?.full_name!==workspace.repo)problems.push('Only authorized same-repository task branches are supported');
   if(pr.head.sha!==submission.payload.commitHash||!commits.some(c=>c.sha===submission.payload.commitHash))problems.push('Submitted commit is not the current PR head');
-  if(pr.changed_files!==files.length)problems.push('Incomplete PR file listing');if(files.some(file=>!spec.allowedPaths.some(p=>boundPath(file,p))||spec.protectedPaths.some(p=>boundPath(file,p))))problems.push('PR violates allowed/protected file contract');
+  if(pr.changed_files!==fileRecords.length)problems.push('Incomplete PR file listing');if(files.some(file=>!spec.allowedPaths.some(p=>boundPath(file,p))||spec.protectedPaths.some(p=>boundPath(file,p))))problems.push('PR violates allowed/protected file contract');
   if(pr.state!=='open'&&!pr.merged)problems.push('PR closed without merge');
   const latest=new Map<string,any>();for(const review of reviews)latest.set(review.user.login,review);if([...latest.values()].some(r=>r.state==='CHANGES_REQUESTED'))problems.push('Outstanding change request');
-  const required=workspace.requiredChecks,ci:PrEvidence['ci']=!checks.length?'not_configured':checks.some(c=>c.status==='completed'&&c.conclusion&&c.conclusion!=='success')?'failed':required.some(name=>!checks.some(c=>c.name===name&&c.status==='completed'&&c.conclusion==='success'))||checks.some(c=>c.status!=='completed')?'pending':'passed';
+  const required=workspace.requiredChecks,ci:PrEvidence['ci']=!checks.length?'not_configured':statuses.total_count>0&&['failure','error'].includes(statuses.state)?'failed':statuses.total_count>0&&statuses.state==='pending'?'pending':checks.some(c=>c.status==='completed'&&c.conclusion&&c.conclusion!=='success')?'failed':required.some(name=>!checks.some(c=>c.name===name&&c.status==='completed'&&c.conclusion==='success'))||checks.some(c=>c.status!=='completed')?'pending':'passed';
   return {number,url:pr.html_url,author:pr.user.login,branch:pr.head.ref,headSha:pr.head.sha,state:pr.state,merged:!!pr.merged,files,reviews:reviews.map(r=>({login:r.user.login,state:r.state})),checks,ci,valid:!problems.length,problems};
  }
  async startChecks(repo:string,id:string,taskId:string){const s=await this.poll(repo,id),user=await this.identity();if(user.id!==s.workspace.host.id)throw new Error('Only host may dispatch checks');const task=s.tasks.find(t=>t.id===taskId);if(!task?.pr?.valid||!s.workspace.workflow)throw new Error('A verified PR and explicit GitHub workflow filename are required');const workflow=(await this.transport(repo).read<any>(`/repos/${repo}/actions/workflows/${encodeURIComponent(s.workspace.workflow)}`)).data;if(workflow.state!=='active')throw new Error('Workflow is not active');await this.api.request('POST',`/repos/${repo}/actions/workflows/${workflow.id}/dispatches`,{ref:task.branch});return {dispatched:true,workflowUrl:workflow.html_url,branch:task.branch};}

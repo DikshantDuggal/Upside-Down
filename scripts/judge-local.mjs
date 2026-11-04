@@ -12,7 +12,7 @@ const reserve=async(port)=>{const server=http.createServer();await new Promise((
 await reserve(4050);await reserve(5180);
 process.env.UD_AUTO_WATCH='false';
 const instance=createServer(path.join(state,'mission.db')),api=instance.app.listen(4050,'127.0.0.1');
-const banner='<div role="status" style="padding:10px 18px;background:#2c2540;color:#eee5ff;font:13px/1.5 system-ui;position:relative;z-index:1000">LOCAL JUDGE PROTOTYPE · Heuristic planning · Manual coding-assistant handoffs · CI, GitHub verification and public deployment are not connected</div>';
+const banner='<div role="status" style="padding:10px 18px;background:#2c2540;color:#eee5ff;font:13px/1.5 system-ui;position:relative;z-index:1000">LOCAL JUDGE PROTOTYPE · Heuristic planning · Manual coding-assistant handoffs · GitHub communication/PR verification available after authorization · CI must be observed · No public deployment</div>';
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon'};
 const front=http.createServer((req,res)=>{
  if(req.url==='/__judge/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({kind:'upside-down-local-judge',status:'ok',mode:'local-heuristic-prototype',api:'http://127.0.0.1:4050'}));return;}

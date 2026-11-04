@@ -694,7 +694,7 @@ export function App() {
 
           {/* ================= PAGES ================= */}
 
-          {page === "github" && <GitHubCommunicationCenter projectId={project?.id} />}
+          {(page === "github" || page === "handoffs") && <GitHubCommunicationCenter projectId={project?.id} />}
           {page === "overview" && (
             <ProjectOverview
               project={project}
@@ -752,7 +752,7 @@ export function App() {
             />
           )}
 
-          {page === "handoffs" && (
+          {page === "handoffs" && false && (
             <HandoffsView
               handoffs={handoffs}
               tasks={tasksV2}

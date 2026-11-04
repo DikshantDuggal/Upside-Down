@@ -33,7 +33,11 @@
     "frontend:rollback": "node scripts/frontend-manager.js rollback",
     "test:replacement": "node --experimental-strip-types server/tests/frontendReplacement.test.ts",
     "test:acceptance": "node --experimental-strip-types server/tests/liveAcceptanceTest.ts",
-    "judge": "node scripts/judge-local.mjs"
+    "judge": "node scripts/judge-local.mjs",
+    "typecheck:github": "tsc -p tsconfig.github.json",
+    "agent:github": "node scripts/agent-bridge.mjs",
+    "build:server": "esbuild server/start.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs",
+    "start:production": "node dist/server.mjs"
   },
   "keywords": [
     "offline-first",

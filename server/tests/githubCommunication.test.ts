@@ -486,7 +486,7 @@ describe("Phase 5: GitHub-Native Multi-Agent Communication Suite (UD-IC/2.0)", (
                 payload: {
                   targetTaskId: "task-be",
                   text: "Please provide GET /api/study-sessions schema and error format",
-                  deadline: "12:00",
+                  deadline: "2026-11-04T12:00:00Z",
                 },
               },
               handoffId
