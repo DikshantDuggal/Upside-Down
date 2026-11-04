@@ -57,6 +57,7 @@ import {
   type CrossAgentHandoff,
   type IntegrationReleaseRecord,
 } from "../api/hackathonApi";
+import { GitHubCommunicationCenter } from "../features/GitHubCommunication";
 import { ProjectOverview } from "../features/ProjectOverview";
 import { IdeaStudio } from "../features/IdeaStudio";
 import { ArchitectureView } from "../features/ArchitectureView";
@@ -71,6 +72,7 @@ const pages = [
   { id: "architecture", label: "Architecture Blueprint", Icon: Cpu },
   { id: "contracts", label: "Work Contracts (2.0)", Icon: Layers },
   { id: "team", label: "Team & Tools", Icon: Users },
+  { id: "github", label: "Agent Communication Center", Icon: MessageSquare },
   { id: "handoffs", label: "Agent Handoffs", Icon: ArrowRightLeft },
   { id: "integration", label: "Release & Deploy", Icon: Rocket },
   { id: "tasks", label: "Task List", Icon: ListTodo },
@@ -113,6 +115,7 @@ const copy: Record<
     title: "Developer Team & AI Tool Hub",
     description: "2–3 developer slots, mixed assistant tools, and shareable teammate invite links.",
   },
+  github: { eyebrow: "GITHUB-NATIVE COORDINATION", title: "Agent Communication Center", description: "Verified GitHub issues, assignments, messages and PR evidence." },
   handoffs: {
     eyebrow: "STAGE 5 — INTERFACE RECONCILIATION",
     title: "Cross-Agent Dependency Handoffs",
@@ -691,6 +694,7 @@ export function App() {
 
           {/* ================= PAGES ================= */}
 
+          {page === "github" && <GitHubCommunicationCenter projectId={project?.id} />}
           {page === "overview" && (
             <ProjectOverview
               project={project}

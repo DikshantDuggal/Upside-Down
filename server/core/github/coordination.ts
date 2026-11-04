@@ -4,7 +4,10 @@ import {GitHubTransport,type GitHubApi} from './transport.ts';
 import {VERSION,canonical,manifestBody,parseManifest,parse,message,validateWorkspace,repoName,login,validateMessage,type Workspace,type AgentMessage,type RemoteComment,type TaskSpec} from './protocol.ts';
 import {reduce,type Snapshot,type PrEvidence} from './reducer.ts';
 const same=(a:string,b:string)=>a.toLowerCase()===b.toLowerCase();
-const boundPath=(file:string,pattern:string)=>{const norm=pattern.replace(/\*\*?\/?/g,'');return file===norm||file.startsWith(norm.endsWith('/')?norm:norm+'/');};
+const boundPath=(file:string,pattern:string)=>{
+ if(!pattern.includes('*'))return file===pattern||file.startsWith(pattern.endsWith('/')?pattern:pattern+'/');
+ let expression='';const meta='\\^$+?.()|{}[]';for(let i=0;i<pattern.length;i++){const c=pattern[i];if(c==='*'){if(pattern[i+1]==='*'){if(pattern[i+2]==='/'){expression+='(?:.*/)?';i+=2;}else{expression+='.*';i++;}}else expression+='[^/]*';}else expression+=meta.includes(c)?'\\'+c:c;}return new RegExp('^'+expression+'$').test(file);
+};
 const stableId=(value:string)=>{const h=createHash('sha256').update(value).digest('hex');return h.slice(0,8)+'-'+h.slice(8,12)+'-5'+h.slice(13,16)+'-a'+h.slice(17,20)+'-'+h.slice(20,32);};
 export class GitHubCoordination {
  readonly api:GitHubApi; readonly cache:CoordinationCache;

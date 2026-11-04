@@ -2,12 +2,12 @@ import {Router,type Request,type Response,type NextFunction} from 'express';
 import {randomBytes,timingSafeEqual,createHash} from 'node:crypto';
 import {GitHubCoordination} from '../core/github/coordination.ts';
 import {message,validateMessage,validateWorkspace,type Workspace} from '../core/github/protocol.ts';
-import {verifyWebhook} from '../core/github/transport.ts';
+import {GitHubError,verifyWebhook} from '../core/github/transport.ts';
 export interface ProjectSource {getProject(id:string):any;getArchitecture(id:string):any;listTasks(id:string):any[]}
 export function createGitHubRouter(service:GitHubCoordination,projects:ProjectSource,pairingKey:string,allowedOrigins:string[],webhookSecret?:string){
  const router=Router(),sessions=new Map<string,{csrf:string;expires:number}>(),attempts=new Map<string,{count:number;at:number}>();
  const same=(a:string,b:string)=>{const aa=Buffer.from(a),bb=Buffer.from(b);return aa.length===bb.length&&timingSafeEqual(aa,bb);};
- const handle=(fn:(req:Request,res:Response)=>Promise<unknown>)=>(req:Request,res:Response,next:NextFunction)=>{Promise.resolve(fn(req,res)).catch(error=>{const code=Number(error.status)||400;res.status(code>=400&&code<600?code:400).json({error:error.message||'GitHub coordination failed',retryAt:error.retryAt});});};
+ const handle=(fn:(req:Request,res:Response)=>Promise<unknown>)=>(req:Request,res:Response,next:NextFunction)=>{Promise.resolve(fn(req,res)).catch(error=>{const code=Number(error.status)||(error instanceof GitHubError?503:400);res.status(code>=400&&code<600?code:400).json({error:error.message||'GitHub coordination failed',retryAt:error.retryAt});});};
  router.post('/webhook',handle(async(req,res)=>{
   const raw=(req as any).githubRaw as Buffer|undefined,signature=req.header('x-hub-signature-256')??'',delivery=req.header('x-github-delivery')??'';
   if(!raw||!webhookSecret||!verifyWebhook(raw,signature,webhookSecret)){res.status(401).json({error:'Invalid or unconfigured GitHub webhook signature'});return;}
