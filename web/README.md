@@ -1,5 +1,26 @@
 # Upside Down dashboard
 
+## Hackathon presentation demo (issue #13)
+
+Open `http://127.0.0.1:5173/#studio`. The original overview, tasks, agents, reviews, conflicts, messaging and network screens remain available in the sidebar. The new studio works without a backend or model API.
+
+1. Keep the prefilled AgentSync problem, type a brief, or select / drag in PDF or Markdown files. Selection keeps names and sizes in memory only; file contents are never read or transmitted.
+2. Click **Create architecture**. A timed reveal presents the fixed supplied AgentSync plan. Select any of four modules to explore ownership. Open the complete architecture, contract or common context document.
+3. Open **Prompt vault**. The host sees four role cards. **Preview access as** restricts the visible role prompt to one laptop, alongside shared documents. Choose a coding-tool label and download the role's PDF or Markdown. The selector is a demonstration, not authentication; static artifacts are public.
+4. **Ready · assign four roles** simulates assignment and saves state in this browser. No laptop is discovered or contacted, no coding tool executes, and no Git branch is created.
+5. Open **Inside the app** to animate a contract-change journey, explore illustrative files and pseudocode, answer a concept question, and practice presentation notes.
+6. **Reset walkthrough** clears only the demo's browser state. Existing workspace data and credentials are untouched.
+
+The one fixed reference is AgentSync: P1 coordinator / SQLite, P2 frontend, P3 API / SSE, P4 bridge / QA. Four laptop roles contain three active agent simulators plus the dashboard contributor, consistent with the supplied architecture. The supplied AgentSync V1 document is a reference artifact; it does not replace the existing Upside Down UD-IC runtime contract.
+
+Downloadable packs live in `web/public/demo/laptop-{a,b,c,d}-pack.pdf`. Each contains its individual prompt, common `context.md`, full supplied `ARCHITECTURE.md`, and full supplied `CONTRACT.md`. Source copies are in `web/src/features/demo/fixtures/`. To regenerate the four PDFs and Markdown handoffs, run `python web/scripts/build-demo-packs.py` with ReportLab installed and Node 24+. The already-generated PDFs need no Python at runtime. Windows Segoe UI / Consolas fonts are embedded when available.
+
+Demo state uses only `upside-down-demo-v1` in localStorage. Uploaded file metadata is not persisted. A fresh-browser URL such as `/#prompts?device=P3` opens the corresponding simulated laptop view. It is a public preview link, not an access token; a localhost URL does not connect another physical laptop.
+
+For a Wi-Fi presentation, you may explicitly launch `npm --prefix web run dev -- --host 0.0.0.0` and use the host's private LAN IP in each device's preview URL. Windows firewall and network reachability must permit port 5173. This serves static demo views only; role selection and assignments remain browser-local, and real cross-device coordination is not implemented by this demo. Existing backend security rules still apply to the original workspace screens.
+
+Browser coverage in `tests/e2e/demo.spec.ts` exercises service-independent generation, selection and drag/drop, role filtering, PDF download, assignment persistence/reset, fresh-device preview links, mobile containment, and accessibility.
+
 React / TypeScript / Vite frontend for **UD-IC/1.0**. All implementation, configuration, dependencies, and tests live inside `web/`. No backend, root configuration, shared contract, or teammate-owned source is changed.
 
 Frontend owner: Guragam Singh (`guragam-singh`). The human confirmed Backend A = Dikshant and Backend B = Arhaan, and reported team contract acceptance in the implementation session. Coordination: repository issue #1; frontend work: issue #4.
@@ -53,9 +74,7 @@ window.upsideDownSession?.update({
 });
 ```
 
-The hook accepts no device bearer token. `canReview` is a UI hint; A/B enforce authorization. Pairing initially sets it false, then the frontend requests paired `GET /local/authorization`. B probes the coordinator with its separately configured reviewer credential and returns `{contractVersion,authorization:{role,canReview}}`. Only a fresh explicit reviewer/admin grant enables controls. Missing support, errors, revocation and expired sessions clear the grant. Checks repeat on window focus and every 30 seconds; a late response cannot resurrect an expired session. No reviewer authority is inferred from the device bearer or local pairing. The cookie can be discarded through browser site-data controls; clearing a UI hint is not server-side logout. Never place credentials in `VITE_*`, localStorage, URLs, or the repository.
-
-For the combined local development launcher and current real browser acceptance, see `client-local/README.md` and `client-local/WEBSITE_VALIDATION.md`. `node client-local/scripts/test-website.mjs` exercises the actual authenticated A/B stack with an isolated Git fixture and Chromium, including reviewer run/approval/application and revocation. It uses port 5174 by default so the normal website can stay running.
+The hook accepts no device bearer token. `canReview` is a UI hint; A/B enforce authorization. Normal local pairing always sets `canReview:false`. Reviewer actions remain unavailable until A/B implement and agree their separate reviewer authority. The cookie can be discarded through browser site-data controls; clearing a UI hint is not server-side logout. Never place credentials in `VITE_*`, localStorage, URLs, or the repository.
 
 Online-only runs/decisions/applications/resolutions retain request keys after ambiguous failures and are never enqueued or automatically retried. Retry original values or reconcile the server job before changing an unknown request. Browser storage failures prevent new mutations rather than losing retry keys.
 
