@@ -45,7 +45,7 @@ test("fixture UI: task filtering, safe diff, reviewer gating and keyboard dialog
   page,
 }) => {
   await mockServices(page);
-  await page.goto("/");
+  await page.goto("/?live=1");
   await expect(page.getByText("Snapshot refreshed")).toBeVisible();
   await page.getByRole("link", { name: "Tasks", exact: true }).click();
   await page.getByRole("textbox", { name: "Search tasks" }).fill("no match");
@@ -85,7 +85,7 @@ test("fixture UI: lost local response retries identical key after browser reload
       headers: { "X-UD-Contract": CONTRACT },
     });
   });
-  await page.goto("/");
+  await page.goto("/?live=1");
   await expect(page.getByText("Snapshot refreshed")).toBeVisible();
   await page.evaluate(() =>
     window.upsideDownSession!.update({
@@ -128,7 +128,7 @@ test("fixture UI: disconnected services never claim a task was queued", async ({
   await page.route("http://127.0.0.1:5173/api/**", (route) =>
     route.fulfill({ status: 503, body: "Unavailable" }),
   );
-  await page.goto("/");
+  await page.goto("/?live=1");
   await expect(
     page.getByText("Services unavailable", { exact: true }),
   ).toBeVisible();
@@ -169,7 +169,7 @@ test("fixture UI: stale conflict resolution refreshes revisions without automati
       });
     },
   );
-  await page.goto("/#conflicts");
+  await page.goto("/?live=1#conflicts");
   await expect(page.getByText("Snapshot refreshed")).toBeVisible();
   await page.evaluate(() =>
     window.upsideDownSession!.update({
@@ -206,7 +206,7 @@ test("fixture UI: mobile navigation, viewport containment and focus", async ({
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockServices(page);
-  await page.goto("/");
+  await page.goto("/?live=1");
   await expect(page.getByText("Snapshot refreshed")).toBeVisible();
   expect(
     await page.evaluate(
@@ -234,7 +234,7 @@ test("fixture UI: WCAG accessibility on overview and task modal", async ({
   page,
 }) => {
   await mockServices(page);
-  await page.goto("/");
+  await page.goto("/?live=1");
   await expect(page.getByText("Snapshot refreshed")).toBeVisible();
   const overview = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
@@ -271,7 +271,7 @@ test("real backend: legacy REST snapshots and named SSE reach the dashboard", as
   expect(health.ok()).toBe(true);
   const tasks = await request.get("/api/tasks");
   expect(Array.isArray(await tasks.json())).toBe(true);
-  await page.goto("/");
+  await page.goto("/?live=1");
   await expect(
     page.getByText("Legacy read mode", { exact: true }),
   ).toBeVisible();

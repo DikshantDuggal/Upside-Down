@@ -13,7 +13,7 @@ const sessionSchema = z.object({
   contractVersion: z.literal(CONTRACT),
   csrfToken: z.string().min(32),
 });
-export function useLocalSession() {
+export function useLocalSession(enabled = true) {
   const session = useBrowserSession();
   const [status, setStatus] = useState<
     "checking" | "required" | "paired" | "unavailable" | "unsupported"
@@ -58,6 +58,7 @@ export function useLocalSession() {
     setError("");
   }, []);
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     void restore(controller.signal);
     const expired = () => {
@@ -71,7 +72,7 @@ export function useLocalSession() {
       controller.abort();
       window.removeEventListener(SESSION_EXPIRED, expired);
     };
-  }, [restore]);
+  }, [restore, enabled]);
   return {
     status: session.csrfToken ? ("paired" as const) : status,
     error,

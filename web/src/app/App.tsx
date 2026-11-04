@@ -58,6 +58,11 @@ import {
 
 import { DemoEntry, DemoWorkspace } from "../features/demo/DemoWorkspace";
 
+import {
+  DemoDashboard,
+  showcaseDescriptions,
+} from "../features/demo/DemoDashboard";
+
 const pages = [
   { id: "studio", label: "Build studio", Icon: FileCode2 },
   { id: "prompts", label: "Prompt vault", Icon: CommandIcon },
@@ -147,9 +152,10 @@ function initialPage(): Page {
 }
 
 export function App() {
-  const data = useDashboard();
+  const showcase = !new URLSearchParams(window.location.search).has("live");
+  const data = useDashboard(!showcase);
   const session = useBrowserSession();
-  const localSession = useLocalSession();
+  const localSession = useLocalSession(!showcase);
   const [pairing, setPairing] = useState(false);
   useEffect(() => {
     if (session.csrfToken) void data.refresh();
@@ -440,9 +446,11 @@ export function App() {
             <div>
               <strong>Your team</strong>
               <span>
-                {data.local
-                  ? `Device ${data.local.deviceId.slice(0, 8)}`
-                  : "No local device connected"}
+                {showcase
+                  ? "4 simulated laptops"
+                  : data.local
+                    ? `Device ${data.local.deviceId.slice(0, 8)}`
+                    : "No local device connected"}
               </span>
             </div>
             <span
@@ -473,11 +481,13 @@ export function App() {
               <span
                 className={`connection-dot ${data.coordinator ? "dot-green" : "dot-amber"}`}
               />
-              {data.coordinator
-                ? "Coordinator connected"
-                : data.loading
-                  ? "Connecting…"
-                  : "Coordinator unavailable"}
+              {showcase
+                ? "Demo workspace"
+                : data.coordinator
+                  ? "Coordinator connected"
+                  : data.loading
+                    ? "Connecting…"
+                    : "Coordinator unavailable"}
             </button>
             <span className="topbar-divider" />
             <button
@@ -498,9 +508,13 @@ export function App() {
             <div>
               <div className="eyebrow">{copy[page].eyebrow}</div>
               <h1>{copy[page].title}</h1>
-              <p>{copy[page].description}</p>
+              <p>
+                {showcase && !isDemo
+                  ? showcaseDescriptions[page]
+                  : copy[page].description}
+              </p>
             </div>
-            {!isDemo && (
+            {!isDemo && !showcase && (
               <button
                 className="button primary new-task"
                 onClick={() => setCreating(true)}
@@ -510,7 +524,7 @@ export function App() {
               </button>
             )}
           </div>
-          {!isDemo && (
+          {!isDemo && !showcase && (
             <>
               <div className="status-strip">
                 <div>
@@ -580,216 +594,221 @@ export function App() {
           {isDemo && (
             <DemoWorkspace page={page as "studio" | "prompts" | "learn"} />
           )}
-          {page === "overview" && (
+          {showcase && !isDemo && <DemoDashboard page={page} />}
+          {!showcase && (
             <>
-              <DemoEntry />
-              <div className="stats-grid">
-                {stats.map(({ label, value, Icon, detail, tone, to }) => (
-                  <button
-                    className="stat-card"
-                    key={label}
-                    onClick={() => navigate(to)}
-                  >
-                    <div className="stat-top">
-                      <span>{label}</span>
-                      <span className={`stat-icon stat-${tone}`}>
-                        <Icon size={18} />
-                      </span>
-                    </div>
-                    <strong className="stat-value">
-                      {data.loading || (!data.refreshedAt && !data.local)
-                        ? "—"
-                        : value}
-                    </strong>
-                    <div className="stat-footer">
-                      <span>{detail}</span>
-                      <ArrowUpRight size={14} />
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <section className="section-block">
-                <SectionHead
-                  title="Your agent team"
-                  eyebrow="PEOPLE + MACHINES"
-                >
-                  <PanelLink onClick={() => navigate("agents")}>
-                    View all agents
-                  </PanelLink>
-                </SectionHead>
-                <AgentCards
-                  agents={data.agents.slice(0, 3)}
-                  selectTask={setTaskId}
-                />
-              </section>
-              <div className="overview-columns">
-                <section className="panel tasks-panel">
-                  <div className="panel-head">
-                    <SectionHead title="Tasks in focus">
-                      <PanelLink onClick={() => navigate("tasks")}>
-                        All tasks
+              {page === "overview" && (
+                <>
+                  <DemoEntry />
+                  <div className="stats-grid">
+                    {stats.map(({ label, value, Icon, detail, tone, to }) => (
+                      <button
+                        className="stat-card"
+                        key={label}
+                        onClick={() => navigate(to)}
+                      >
+                        <div className="stat-top">
+                          <span>{label}</span>
+                          <span className={`stat-icon stat-${tone}`}>
+                            <Icon size={18} />
+                          </span>
+                        </div>
+                        <strong className="stat-value">
+                          {data.loading || (!data.refreshedAt && !data.local)
+                            ? "—"
+                            : value}
+                        </strong>
+                        <div className="stat-footer">
+                          <span>{detail}</span>
+                          <ArrowUpRight size={14} />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <section className="section-block">
+                    <SectionHead
+                      title="Your agent team"
+                      eyebrow="PEOPLE + MACHINES"
+                    >
+                      <PanelLink onClick={() => navigate("agents")}>
+                        View all agents
                       </PanelLink>
                     </SectionHead>
+                    <AgentCards
+                      agents={data.agents.slice(0, 3)}
+                      selectTask={setTaskId}
+                    />
+                  </section>
+                  <div className="overview-columns">
+                    <section className="panel tasks-panel">
+                      <div className="panel-head">
+                        <SectionHead title="Tasks in focus">
+                          <PanelLink onClick={() => navigate("tasks")}>
+                            All tasks
+                          </PanelLink>
+                        </SectionHead>
+                      </div>
+                      <TaskList
+                        tasks={data.tasks}
+                        agents={data.agents}
+                        selectTask={setTaskId}
+                        compact
+                      />
+                    </section>
+                    <section className="panel activity-panel">
+                      <div className="panel-head">
+                        <SectionHead title="Latest activity">
+                          <span
+                            className={`activity-live ${data.remoteStream ? "text-green" : "muted"}`}
+                          >
+                            <span
+                              className={`connection-dot ${data.remoteStream ? "dot-green" : "dot-gray"}`}
+                            />
+                            {data.remoteStream ? "Live" : "Offline"}
+                          </span>
+                        </SectionHead>
+                      </div>
+                      <ActivityList
+                        events={data.events}
+                        selectTask={setTaskId}
+                        compact
+                      />
+                      <div className="panel-foot">
+                        <PanelLink onClick={() => navigate("activity")}>
+                          Open activity journal
+                        </PanelLink>
+                      </div>
+                    </section>
                   </div>
+                  <section className="workspace-principle">
+                    <div className="principle-icon">
+                      <ShieldCheck size={22} />
+                    </div>
+                    <div>
+                      <h3>Progress you can trust.</h3>
+                      <p>
+                        Every task, patch, and test result reflects reported
+                        backend state. Approval and verified application are
+                        always separate.
+                      </p>
+                    </div>
+                    <button
+                      className="icon-button"
+                      aria-label="Open workspace guide"
+                      onClick={() => setHelp(true)}
+                    >
+                      <ArrowUpRight size={20} />
+                    </button>
+                  </section>
+                </>
+              )}
+              {page === "tasks" && (
+                <section className="panel">
                   <TaskList
                     tasks={data.tasks}
                     agents={data.agents}
                     selectTask={setTaskId}
-                    compact
                   />
                 </section>
-                <section className="panel activity-panel">
+              )}
+              {page === "agents" && (
+                <>
+                  <AgentCards agents={data.agents} selectTask={setTaskId} />
+                  <Notice>
+                    A registered or running agent is not proof of LLM execution.
+                    The current supported provider is bounded heuristic repair.
+                  </Notice>
+                </>
+              )}
+              {page === "activity" && (
+                <section className="panel activity-full">
                   <div className="panel-head">
-                    <SectionHead title="Latest activity">
-                      <span
-                        className={`activity-live ${data.remoteStream ? "text-green" : "muted"}`}
-                      >
-                        <span
-                          className={`connection-dot ${data.remoteStream ? "dot-green" : "dot-gray"}`}
-                        />
-                        {data.remoteStream ? "Live" : "Offline"}
+                    <SectionHead title="Activity journal">
+                      <span className="muted small">
+                        Most recent {data.events.length} loaded events
                       </span>
                     </SectionHead>
                   </div>
-                  <ActivityList
-                    events={data.events}
-                    selectTask={setTaskId}
-                    compact
-                  />
-                  <div className="panel-foot">
-                    <PanelLink onClick={() => navigate("activity")}>
-                      Open activity journal
-                    </PanelLink>
-                  </div>
+                  <ActivityList events={data.events} selectTask={setTaskId} />
                 </section>
-              </div>
-              <section className="workspace-principle">
-                <div className="principle-icon">
-                  <ShieldCheck size={22} />
-                </div>
-                <div>
-                  <h3>Progress you can trust.</h3>
-                  <p>
-                    Every task, patch, and test result reflects reported backend
-                    state. Approval and verified application are always
-                    separate.
-                  </p>
-                </div>
-                <button
-                  className="icon-button"
-                  aria-label="Open workspace guide"
-                  onClick={() => setHelp(true)}
-                >
-                  <ArrowUpRight size={20} />
-                </button>
-              </section>
-            </>
-          )}
-          {page === "tasks" && (
-            <section className="panel">
-              <TaskList
-                tasks={data.tasks}
-                agents={data.agents}
-                selectTask={setTaskId}
-              />
-            </section>
-          )}
-          {page === "agents" && (
-            <>
-              <AgentCards agents={data.agents} selectTask={setTaskId} />
-              <Notice>
-                A registered or running agent is not proof of LLM execution. The
-                current supported provider is bounded heuristic repair.
-              </Notice>
-            </>
-          )}
-          {page === "activity" && (
-            <section className="panel activity-full">
-              <div className="panel-head">
-                <SectionHead title="Activity journal">
-                  <span className="muted small">
-                    Most recent {data.events.length} loaded events
-                  </span>
-                </SectionHead>
-              </div>
-              <ActivityList events={data.events} selectTask={setTaskId} />
-            </section>
-          )}
-          {page === "reviews" && (
-            <>
-              <div className="panel">
-                <div className="panel-head">
-                  <SectionHead title="Patch proposals">
-                    <Badge>
-                      {data.capabilities?.patchCompletionMode ??
-                        "legacy_decision"}
-                    </Badge>
-                  </SectionHead>
-                </div>
-                <PatchList patches={data.patches} open={setPatch} />
-              </div>
-              <form
-                className="patch-lookup"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void loadPatch();
-                }}
-              >
-                <FileCode2 size={19} />
-                <div>
-                  <strong>Have a patch ID?</strong>
-                  <span className="muted small">
-                    Legacy backends discover proposals through activity. You can
-                    also open one directly.
-                  </span>
-                </div>
-                <input
-                  aria-label="Patch ID"
-                  placeholder="Paste patch ID"
-                  value={patchId}
-                  onChange={(event) => setPatchId(event.target.value)}
+              )}
+              {page === "reviews" && (
+                <>
+                  <div className="panel">
+                    <div className="panel-head">
+                      <SectionHead title="Patch proposals">
+                        <Badge>
+                          {data.capabilities?.patchCompletionMode ??
+                            "legacy_decision"}
+                        </Badge>
+                      </SectionHead>
+                    </div>
+                    <PatchList patches={data.patches} open={setPatch} />
+                  </div>
+                  <form
+                    className="patch-lookup"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void loadPatch();
+                    }}
+                  >
+                    <FileCode2 size={19} />
+                    <div>
+                      <strong>Have a patch ID?</strong>
+                      <span className="muted small">
+                        Legacy backends discover proposals through activity. You
+                        can also open one directly.
+                      </span>
+                    </div>
+                    <input
+                      aria-label="Patch ID"
+                      placeholder="Paste patch ID"
+                      value={patchId}
+                      onChange={(event) => setPatchId(event.target.value)}
+                    />
+                    <button
+                      className="button secondary"
+                      disabled={!patchId.trim() || patchLoading}
+                    >
+                      {patchLoading ? "Opening…" : "Open patch"}
+                      <ArrowRight size={14} />
+                    </button>
+                  </form>
+                </>
+              )}
+              {page === "conflicts" && (
+                <>
+                  <ConflictList conflicts={data.conflicts} open={setConflict} />
+                  {!data.capabilities?.features.sync && (
+                    <Notice>
+                      Durable conflict synchronization is unavailable on this
+                      backend.
+                    </Notice>
+                  )}
+                </>
+              )}
+              {page === "messages" && (
+                <Messages
+                  messages={data.messages}
+                  submit={submit}
+                  unavailable={unavailable}
                 />
-                <button
-                  className="button secondary"
-                  disabled={!patchId.trim() || patchLoading}
-                >
-                  {patchLoading ? "Opening…" : "Open patch"}
-                  <ArrowRight size={14} />
-                </button>
-              </form>
-            </>
-          )}
-          {page === "conflicts" && (
-            <>
-              <ConflictList conflicts={data.conflicts} open={setConflict} />
-              {!data.capabilities?.features.sync && (
-                <Notice>
-                  Durable conflict synchronization is unavailable on this
-                  backend.
-                </Notice>
+              )}
+              {page === "network" && (
+                <LocalSessionCard
+                  session={localSession}
+                  open={() => setPairing(true)}
+                />
+              )}
+              {page === "network" && (
+                <Network
+                  data={data}
+                  intents={intents}
+                  storageError={storageError}
+                  retry={(intent) => void retry(intent)}
+                />
               )}
             </>
-          )}
-          {page === "messages" && (
-            <Messages
-              messages={data.messages}
-              submit={submit}
-              unavailable={unavailable}
-            />
-          )}
-          {page === "network" && (
-            <LocalSessionCard
-              session={localSession}
-              open={() => setPairing(true)}
-            />
-          )}
-          {page === "network" && (
-            <Network
-              data={data}
-              intents={intents}
-              storageError={storageError}
-              retry={(intent) => void retry(intent)}
-            />
           )}
           <footer className="page-footer">
             <span>
